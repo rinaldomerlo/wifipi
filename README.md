@@ -32,7 +32,7 @@ Clone or place the `wifipi` repository in `/opt/wifipi`:
 
 ```bash
 sudo mkdir -p /opt/wifipi
-sudo chown -R pi:pi /opt/wifipi
+sudo chown -R $USER:$USER /opt/wifipi
 git clone https://github.com/rinaldomerlo/wifipi.git /opt/wifipi
 cd /opt/wifipi
 ```
@@ -48,15 +48,15 @@ pip install -r requirements.txt
 
 ### Step 3: Configure Passwordless Sudo for WiFi Scanning
 
-The WiFi Utilization Monitor executes `sudo iw dev <interface> scan` to collect live wireless scan data. To allow the app user (`pi`) to run scans without a password prompt:
+The WiFi Utilization Monitor executes `sudo iw dev <interface> scan` to collect live wireless scan data. To allow the app user (e.g. `$USER`, `jenkins`, or `pi`) to run scans without a password prompt:
 
 1. Open sudoers configuration:
    ```bash
    sudo visudo
    ```
-2. Add the following rule at the end of the file:
+2. Add the following rule at the end of the file (replace `$USER` with your actual username if needed):
    ```text
-   pi ALL=(ALL) NOPASSWD: /usr/sbin/iw
+   $USER ALL=(ALL) NOPASSWD: /usr/sbin/iw
    ```
    *(Verify absolute path with `which iw`)*
 
@@ -69,6 +69,8 @@ sudo cp deploy/wifi-monitor.service /etc/systemd/system/
 sudo cp deploy/iperf-generator.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
+
+*Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit `/etc/systemd/system/wifi-monitor.service` and `iperf-generator.service` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
 
 Enable and start both services:
 

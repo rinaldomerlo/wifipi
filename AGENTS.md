@@ -22,9 +22,9 @@ Project Root Structure:
 - **Purpose**: Visualizes live WiFi channel utilization, spectrum coverage across **2.4 GHz, 5 GHz, and 6 GHz** bands, and BSS scanning results.
 - **Backend (`app.py`, `parser.py`)**: Executes wireless scan commands and parses raw output.
 - **System Privilege Requirement**: Performs live scans via `sudo iw dev <interface> scan`. 
-  - *Sudoers Rule*: Requires passwordless sudo configuration for the `pi` user:
+  - *Sudoers Rule*: Requires passwordless sudo configuration for the local app user (e.g. `jenkins` or `pi`):
     ```text
-    pi ALL=(ALL) NOPASSWD: /usr/sbin/iw
+    <username> ALL=(ALL) NOPASSWD: /usr/sbin/iw
     ```
 - **Frontend (`static/js/app.js`, `templates/index.html`)**:
   - Configurable refresh rate options (10s, 30s, 1m, 2m, 5m).
