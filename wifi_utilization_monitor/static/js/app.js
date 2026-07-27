@@ -88,6 +88,9 @@ function initElements() {
         }
     }
 
+    // Set initial band visibility based on state.activeBand
+    updateBandVisibility();
+
     // Set resize listener to re-draw canvas when screen size changes
     window.addEventListener('resize', () => {
         for (const [id, canvas] of Object.entries(state.canvasElements)) {

@@ -1,2 +1,2 @@
 # WiFiPi
-Wireless Testing Environment based around a raspberry pi
+Wireless Testing Environment tools to run on a raspberry pi
