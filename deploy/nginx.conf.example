@@ -7,8 +7,9 @@
 
 # Server 1: WiFi Channel & Utilization Monitor (proxied on HTTP port 80)
 server {
-    listen 80;
-    server_name wifipi.local raspberrypi;
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
 
     location / {
         proxy_pass http://127.0.0.1:5000;
@@ -21,8 +22,9 @@ server {
 
 # Server 2: iPerf3 Congestion Generator (proxied on HTTP port 8080)
 server {
-    listen 8080;
-    server_name wifipi.local raspberrypi;
+    listen 8080 default_server;
+    listen [::]:8080 default_server;
+    server_name _;
 
     location / {
         proxy_pass http://127.0.0.1:5001;
