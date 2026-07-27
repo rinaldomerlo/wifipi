@@ -208,7 +208,7 @@ def api_scan():
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5001))
+    port = int(os.environ.get('PORT', 5000))
     if len(sys.argv) > 1:
         try:
             port = int(sys.argv[1])

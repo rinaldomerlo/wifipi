@@ -20,7 +20,7 @@ source .venv/bin/activate
 python app.py
 ```
 
-Then open **http://<pi-ip>:5000** in a browser.
+Then open **http://<pi-ip>:5001** in a browser.
 
 ## Features
 

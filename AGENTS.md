@@ -51,14 +51,14 @@ Both applications share a unified design system:
 Production deployments avoid Flask development debug mode (`python3 app.py`) in favor of a robust WSGI stack:
 
 1. **WSGI Server**: **Gunicorn** (`gunicorn>=20.1.0`)
-   - WiFi Monitor worker: bound to `0.0.0.0:8000` (2 workers).
-   - iPerf Generator worker: bound to `0.0.0.0:8001` (1 worker, multi-threaded for SSE streaming).
+   - WiFi Monitor worker: bound to `0.0.0.0:5000` (2 workers).
+   - iPerf Generator worker: bound to `0.0.0.0:5001` (1 worker, multi-threaded for SSE streaming).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
-   - Port `80`: Proxies to WiFi Monitor (`127.0.0.1:8000`).
-   - Port `8080`: Proxies to iPerf Generator (`127.0.0.1:8001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
+   - Port `80`: Proxies to WiFi Monitor (`127.0.0.1:5000`).
+   - Port `8080`: Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
 
 ---
 

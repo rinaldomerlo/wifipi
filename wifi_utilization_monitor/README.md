@@ -31,8 +31,8 @@ A Flask web application that visualizes real-time WiFi channel utilization and s
    ```bash
    python3 app.py [port]
    ```
-   By default, the server runs on port **5001**. You can customize the port by passing it as a command line argument (e.g., `python3 app.py 5055`). Open your browser and navigate to:
-   [http://localhost:5055](http://localhost:5055) (or the port specified)
+   By default, the server runs on port **5000**. You can customize the port by passing it as a command line argument (e.g., `python3 app.py 5055`). Open your browser and navigate to:
+   [http://localhost:5000](http://localhost:5000) (or the port specified)
 
 ## Configuring Live Scanning (Linux/Raspberry Pi)
 
