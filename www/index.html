@@ -3,31 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WiFiPi - Wireless Testing & Monitoring Suite</title>
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>WiFiPi - Wireless Testing Tools</title>
     <style>
         :root {
-            --bg-dark: #090a10;
-            --glass-bg: rgba(18, 22, 38, 0.65);
-            --glass-card: rgba(255, 255, 255, 0.03);
-            --glass-card-hover: rgba(255, 255, 255, 0.07);
-            --glass-border: rgba(255, 255, 255, 0.08);
-            --glass-border-hover: rgba(0, 210, 255, 0.3);
-            
-            --text-primary: #f0f3f8;
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            
-            --color-blue: #00d2ff;
-            --color-pink: #ff007f;
-            --color-purple: #9d4edd;
-            --color-green: #00f5d4;
-            --color-amber: #ffb703;
+            --accent-color: #38bdf8;
         }
 
         * {
@@ -37,8 +21,8 @@
         }
 
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background-color: var(--bg-dark);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
@@ -46,331 +30,153 @@
             align-items: center;
             justify-content: center;
             padding: 2rem 1rem;
-            position: relative;
-            overflow-x: hidden;
-        }
-
-        /* Ambient Background Glows */
-        .glass-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: 
-                radial-gradient(circle at 15% 20%, rgba(0, 210, 255, 0.12) 0%, transparent 45%),
-                radial-gradient(circle at 85% 75%, rgba(255, 0, 127, 0.10) 0%, transparent 45%),
-                radial-gradient(circle at 50% 50%, rgba(157, 78, 221, 0.08) 0%, transparent 50%);
-            z-index: -1;
-            pointer-events: none;
         }
 
         .container {
             width: 100%;
-            max-width: 1000px;
-            margin: 0 auto;
+            max-width: 800px;
         }
 
-        /* Header */
         header {
-            text-align: center;
-            margin-bottom: 3.5rem;
-        }
-
-        .logo-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.75rem;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--glass-border);
-            padding: 0.5rem 1.25rem;
-            border-radius: 50px;
-            margin-bottom: 1.25rem;
-            backdrop-filter: blur(10px);
-        }
-
-        .logo-badge i {
-            color: var(--color-blue);
-            font-size: 1.2rem;
-        }
-
-        .logo-badge span {
-            font-family: 'Outfit', sans-serif;
-            font-weight: 700;
-            letter-spacing: 2px;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            text-transform: uppercase;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 1rem;
         }
 
         h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 3rem;
-            font-weight: 800;
-            letter-spacing: -1px;
-            line-height: 1.1;
-            margin-bottom: 0.75rem;
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+            color: var(--text-primary);
         }
 
-        h1 span {
-            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        h1 span, footer span {
+            color: var(--accent-color);
         }
 
         .subtitle {
             color: var(--text-secondary);
-            font-size: 1.15rem;
-            max-width: 600px;
-            margin: 0 auto;
-            line-height: 1.5;
+            font-size: 0.95rem;
         }
 
-        /* App Cards Grid */
         .apps-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 2rem;
-            margin-bottom: 3rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 2rem;
         }
 
         .app-card {
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            padding: 2.25rem;
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1.25rem;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-            backdrop-filter: blur(16px);
-            position: relative;
-            overflow: hidden;
             text-decoration: none;
             color: inherit;
-        }
-
-        .app-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: transparent;
-            transition: background 0.35s ease;
-        }
-
-        .app-card.wifimon::before {
-            background: linear-gradient(90deg, var(--color-blue), var(--color-green));
-        }
-
-        .app-card.iperf::before {
-            background: linear-gradient(90deg, var(--color-pink), var(--color-amber));
+            transition: border-color 0.2s ease, background-color 0.2s ease;
         }
 
         .app-card:hover {
-            transform: translateY(-6px);
-            border-color: var(--glass-border-hover);
-            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
-            background: rgba(22, 27, 46, 0.8);
+            border-color: var(--accent-color);
+            background-color: #24334d;
         }
 
         .card-header {
             display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            margin-bottom: 1.5rem;
-        }
-
-        .card-icon {
-            width: 56px;
-            height: 56px;
-            border-radius: 16px;
-            display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-        }
-
-        .wifimon .card-icon {
-            background: rgba(0, 210, 255, 0.1);
-            color: var(--color-blue);
-            border: 1px solid rgba(0, 210, 255, 0.2);
-        }
-
-        .iperf .card-icon {
-            background: rgba(255, 0, 127, 0.1);
-            color: var(--color-pink);
-            border: 1px solid rgba(255, 0, 127, 0.2);
-        }
-
-        .path-tag {
-            font-family: monospace;
-            font-size: 0.8rem;
-            padding: 0.35rem 0.75rem;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-muted);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .card-body h2 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.5rem;
-            font-weight: 700;
+            justify-content: space-between;
             margin-bottom: 0.75rem;
         }
 
-        .card-body p {
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .path-badge {
+            font-family: monospace;
+            font-size: 0.8rem;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            color: var(--accent-color);
+        }
+
+        .card-desc {
             color: var(--text-secondary);
-            font-size: 0.95rem;
-            line-height: 1.6;
-            margin-bottom: 1.5rem;
-        }
-
-        .feature-list {
-            list-style: none;
-            margin-bottom: 2rem;
-        }
-
-        .feature-list li {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
             font-size: 0.88rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.5rem;
+            line-height: 1.5;
+            margin-bottom: 1.25rem;
         }
 
-        .wifimon .feature-list li i { color: var(--color-blue); }
-        .iperf .feature-list li i { color: var(--color-pink); }
-
-        .btn-launch {
+        .btn-open {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.75rem;
-            width: 100%;
-            padding: 0.85rem 1.5rem;
-            border-radius: 12px;
-            font-family: 'Outfit', sans-serif;
+            padding: 0.5rem 0.85rem;
+            border-radius: 6px;
+            background-color: var(--accent-color);
+            color: #0f172a;
             font-weight: 600;
-            font-size: 0.95rem;
-            transition: all 0.25s ease;
-            cursor: pointer;
+            font-size: 0.88rem;
             border: none;
+            transition: background-color 0.2s ease;
         }
 
-        .wifimon .btn-launch {
-            background: linear-gradient(135deg, rgba(0, 210, 255, 0.2), rgba(0, 245, 212, 0.1));
-            color: var(--color-blue);
-            border: 1px solid rgba(0, 210, 255, 0.3);
+        .app-card:hover .btn-open {
+            background-color: #7dd3fc;
         }
 
-        .wifimon:hover .btn-launch {
-            background: linear-gradient(135deg, var(--color-blue), #00a8e8);
-            color: #000;
-            box-shadow: 0 0 20px rgba(0, 210, 255, 0.4);
-        }
-
-        .iperf .btn-launch {
-            background: linear-gradient(135deg, rgba(255, 0, 127, 0.2), rgba(255, 183, 3, 0.1));
-            color: var(--color-pink);
-            border: 1px solid rgba(255, 0, 127, 0.3);
-        }
-
-        .iperf:hover .btn-launch {
-            background: linear-gradient(135deg, var(--color-pink), #d6006e);
-            color: #fff;
-            box-shadow: 0 0 20px rgba(255, 0, 127, 0.4);
-        }
-
-        /* Footer */
         footer {
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.85rem;
-        }
-
-        footer p {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-        }
-
-        footer i {
-            color: var(--color-purple);
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            border-top: 1px solid var(--card-border);
+            padding-top: 1rem;
         }
     </style>
 </head>
 <body>
 
-    <div class="glass-bg"></div>
-
     <div class="container">
         <header>
-            <div class="logo-badge">
-                <i class="fa-solid fa-microchip"></i>
-                <span>Raspberry Pi Suite</span>
-            </div>
-            <h1>WiFi<span>Pi</span> Platform</h1>
-            <p class="subtitle">Standalone wireless spectrum analysis, channel utilization, and network performance testing applications.</p>
+            <h1>WiFi<span>Pi</span> Testing Tools</h1>
+            <p class="subtitle">Wireless spectrum analysis & network performance tools</p>
         </header>
 
         <div class="apps-grid">
-            <!-- WiFi Monitor Application -->
-            <a href="/wifimon/" class="app-card wifimon">
+            <a href="/wifimon/" class="app-card">
                 <div>
                     <div class="card-header">
-                        <div class="card-icon">
-                            <i class="fa-solid fa-wifi"></i>
-                        </div>
-                        <span class="path-tag">/wifimon/</span>
+                        <h2 class="card-title">WiFi Utilization Monitor</h2>
+                        <span class="path-badge">/wifimon/</span>
                     </div>
-                    <div class="card-body">
-                        <h2>WiFi Channel & Utilization Monitor</h2>
-                        <p>Real-time wireless spectrum analyzer and BSS scanner across 2.4 GHz, 5 GHz, and 6 GHz bands.</p>
-                        <ul class="feature-list">
-                            <li><i class="fa-solid fa-check"></i> Live multi-band spectrum graphs</li>
-                            <li><i class="fa-solid fa-check"></i> Channel occupancy & utilization metrics</li>
-                            <li><i class="fa-solid fa-check"></i> Detailed BSSID directory & security scanner</li>
-                        </ul>
-                    </div>
+                    <p class="card-desc">Real-time spectrum analysis, channel utilization, and BSS scanning across 2.4 GHz, 5 GHz, and 6 GHz bands.</p>
                 </div>
-                <div class="btn-launch">
-                    Launch Application <i class="fa-solid fa-arrow-right"></i>
+                <div class="btn-open">
+                    Open App &rarr;
                 </div>
             </a>
 
-            <!-- iPerf Generator Application -->
-            <a href="/iperf/" class="app-card iperf">
+            <a href="/iperf/" class="app-card">
                 <div>
                     <div class="card-header">
-                        <div class="card-icon">
-                            <i class="fa-solid fa-bolt"></i>
-                        </div>
-                        <span class="path-tag">/iperf/</span>
+                        <h2 class="card-title">iPerf3 Congestion Generator</h2>
+                        <span class="path-badge">/iperf/</span>
                     </div>
-                    <div class="card-body">
-                        <h2>iPerf3 Congestion Generator</h2>
-                        <p>Browser-based controller for driving long-running iPerf3 network streams across interfaces.</p>
-                        <ul class="feature-list">
-                            <li><i class="fa-solid fa-check"></i> Automated LAN iPerf3 server scanner</li>
-                            <li><i class="fa-solid fa-check"></i> Interface binding & bandwidth controls</li>
-                            <li><i class="fa-solid fa-check"></i> Real-time SSE stdout output streaming</li>
-                        </ul>
-                    </div>
+                    <p class="card-desc">Configure, monitor, and run iPerf3 client test streams across network interfaces.</p>
                 </div>
-                <div class="btn-launch">
-                    Launch Application <i class="fa-solid fa-arrow-right"></i>
+                <div class="btn-open">
+                    Open App &rarr;
                 </div>
             </a>
         </div>
 
         <footer>
-            <p><i class="fa-solid fa-terminal"></i> WiFiPi Production Deployment &bull; Hosted with Nginx & Gunicorn</p>
+            <p>WiFi<span>Pi</span> &bull; Hosted on Raspberry Pi</p>
         </footer>
     </div>
 

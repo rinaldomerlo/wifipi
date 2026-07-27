@@ -10,6 +10,8 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A Flask web application that visualizes real-time WiFi channel utilization, spectrum coverage across 2.4 GHz, 5 GHz, and 6 GHz bands, and live BSS scanning.
 2. **iPerf3 Congestion Generator (`iperf_congestion_generator`)**  
    A browser-based UI to configure, monitor, and control long-running `iperf3` client test streams across network interfaces.
+3. **Default Landing Webpage (`www`)**  
+   A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
 
@@ -85,18 +87,27 @@ sudo systemctl status wifi-monitor
 sudo systemctl status iperf-generator
 ```
 
-### Step 5: Configure Nginx Reverse Proxy
+### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-1. Copy or create the Nginx configuration from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`:
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/` and `/iperf/` to the respective backend Flask apps.
+
+1. Ensure the static web directory `/opt/wifipi/www` has readable permissions for Nginx (`www-data`):
+   ```bash
+   sudo chmod -R 755 /opt/wifipi/www
+   ```
+
+2. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`:
    ```bash
    sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/wifipi
    ```
-2. Enable the site by creating a symbolic link in `sites-enabled`:
+
+3. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
    ```bash
    sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
-3. Test the Nginx configuration and restart Nginx:
+
+4. Test the Nginx configuration and restart Nginx:
    ```bash
    sudo nginx -t
    sudo systemctl restart nginx
