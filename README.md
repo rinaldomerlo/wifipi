@@ -62,7 +62,7 @@ The WiFi Utilization Monitor executes `sudo iw dev <interface> scan` to collect 
 
 ### Step 4: Set Up Systemd Services
 
-Systemd service files are provided in the `deploy/` directory. Copy them to `/systemd/system/`:
+Systemd service files are provided in the `deploy/` directory. Copy them to `/etc/systemd/system/`:
 
 ```bash
 sudo cp deploy/wifi-monitor.service /etc/systemd/system/
@@ -102,5 +102,5 @@ sudo systemctl status iperf-generator
 
 ### Accessing Your Applications
 
-- **WiFi Channel & Utilization Monitor**: Open `http://<pi-ip>/` (Port 80)
-- **iPerf3 Congestion Generator**: Open `http://<pi-ip>:8080/` (Port 8080)
+- **WiFi Channel & Utilization Monitor**: Open `http://<pi-ip>/` (Port 80 reverse-proxied to backend Gunicorn on port 5000)
+- **iPerf3 Congestion Generator**: Open `http://<pi-ip>:8080/` (Port 8080 reverse-proxied to backend Gunicorn on port 5001)
