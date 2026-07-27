@@ -118,6 +118,34 @@
             letter-spacing: 1.5px;
         }
 
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
         .glass-card {
             background: var(--glass-bg);
             backdrop-filter: blur(12px);
@@ -323,6 +351,10 @@
                     <span class="subtitle">Network Congestion Generator</span>
                 </div>
             </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+                <a href="/wifimon/" class="nav-btn"><i class="fa-solid fa-wifi"></i> WiFi Monitor</a>
+            </div>
         </header>
 
         <div class="glass-card">
@@ -380,7 +412,7 @@
             document.getElementById('scan-results').innerHTML = '';
 
             try {
-                const res = await fetch('/scan', { method: 'POST' });
+                const res = await fetch('scan', { method: 'POST' });
                 const data = await res.json();
                 if (data.error) {
                     setStatus('Scan error: ' + data.error, 'var(--color-pink)');
@@ -420,7 +452,7 @@
             setStatus('Starting…', 'var(--color-blue)');
 
             try {
-                const res = await fetch('/start', {
+                const res = await fetch('start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -451,7 +483,7 @@
             const out = document.getElementById('output');
             out.textContent = '';
 
-            eventSource = new EventSource('/stream');
+            eventSource = new EventSource('stream');
             eventSource.onmessage = (e) => {
                 if (e.data === '') return; // keepalive
                 out.textContent += e.data.replace(/\\n/g, '\n') + '\n';
@@ -466,7 +498,7 @@
         }
 
         async function stopTest() {
-            await fetch('/stop', { method: 'POST' });
+            await fetch('stop', { method: 'POST' });
             if (eventSource) { eventSource.close(); eventSource = null; }
             setRunning(false);
             setStatus('Test stopped.', 'var(--color-orange)');

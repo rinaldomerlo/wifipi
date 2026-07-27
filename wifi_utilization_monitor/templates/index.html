@@ -11,7 +11,7 @@
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Main Style Sheet -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="static/css/styles.css">
 </head>
 <body>
     <div class="glass-bg"></div>
@@ -59,6 +59,12 @@
                     <button id="pauseBtn" class="btn btn-secondary" title="Pause auto-refresh">
                         <i class="fa-solid fa-pause"></i>
                     </button>
+                    <a href="/" class="btn btn-secondary" title="Home Landing Page" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-house"></i>
+                    </a>
+                    <a href="/iperf/" class="btn btn-secondary" title="Open iPerf Generator" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-bolt"></i>
+                    </a>
                 </div>
             </div>
         </header>
@@ -258,6 +264,6 @@
     </div>
 
     <!-- Script imports -->
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="static/js/app.js"></script>
 </body>
 </html>

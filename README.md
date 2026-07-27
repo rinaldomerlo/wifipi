@@ -104,5 +104,8 @@ sudo systemctl status iperf-generator
 
 ### Accessing Your Applications
 
-- **WiFi Channel & Utilization Monitor**: Open `http://<pi-ip>/` (Port 80 reverse-proxied to backend Gunicorn on port 5000)
-- **iPerf3 Congestion Generator**: Open `http://<pi-ip>:8080/` (Port 8080 reverse-proxied to backend Gunicorn on port 5001)
+All applications are served over standard HTTP (Port 80) via path routing:
+
+- **Default Webpage (Root `/`)**: Open `http://<pi-ip>/` (Static landing page in `/opt/wifipi/www` with links to all tools)
+- **WiFi Channel & Utilization Monitor**: Open `http://<pi-ip>/wifimon/` (Subpath `/wifimon/` reverse-proxied to Gunicorn on port 5000)
+- **iPerf3 Congestion Generator**: Open `http://<pi-ip>/iperf/` (Subpath `/iperf/` reverse-proxied to Gunicorn on port 5001)

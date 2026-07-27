@@ -9,6 +9,7 @@ This document summarizes the architecture, key components, design standards, and
 **WiFiPi** is a collection of wireless testing and monitoring tools designed to run natively on a Raspberry Pi. The repository contains two standalone Flask web applications with a unified modern UI and production deployment configurations.
 
 Project Root Structure:
+- `www/` — Default static landing webpage (`index.html`).
 - `wifi_utilization_monitor/` — Real-time WiFi channel utilization and spectrum analyzer.
 - `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
@@ -57,8 +58,9 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `wifi-monitor.service`
    - `iperf-generator.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
-   - Port `80`: Proxies to WiFi Monitor (`127.0.0.1:5000`).
-   - Port `8080`: Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
+   - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
+   - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
+   - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
 
 ---
 

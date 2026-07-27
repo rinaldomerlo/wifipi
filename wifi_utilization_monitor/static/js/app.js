@@ -463,7 +463,7 @@ function hitTestUtilization(mx, my, w, h, bandName) {
 // Retrieve wireless interfaces from API
 async function loadInterfaces() {
     try {
-        const response = await fetch('/api/interfaces');
+        const response = await fetch('api/interfaces');
         const data = await response.json();
         state.interfaces = data.interfaces || [];
         
@@ -504,7 +504,7 @@ async function triggerScan() {
     updateStatusText(`Scanning wireless spectrum on ${state.selectedInterface || 'interface'}...`, 'scanning');
     
     try {
-        const url = `/api/scan?interface=${encodeURIComponent(state.selectedInterface)}&source=auto`;
+        const url = `api/scan?interface=${encodeURIComponent(state.selectedInterface)}&source=auto`;
         const response = await fetch(url);
         const data = await response.json();
         
