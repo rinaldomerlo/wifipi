@@ -1,0 +1,13 @@
+[Unit]
+Description=iPerf3 Congestion Generator (Flask / Gunicorn)
+After=network.target
+
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/opt/wifipi/iperf_congestion_generator
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 127.0.0.1:8001 --workers 1 --threads 4 --timeout 120 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
