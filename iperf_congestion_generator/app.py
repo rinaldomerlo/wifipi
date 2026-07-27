@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""
+Flask web app equivalent of simple_iperf3_start.sh.
+Provides a browser UI to configure and launch an iperf3 client test.
+"""
+
+import subprocess
+import threading
+import queue
+import shutil
+import re
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+
+app = Flask(__name__)
+
+# Global state for the running test
+test_process = None
+test_lock = threading.Lock()
+output_queue = queue.Queue()
+
+
+def is_valid_ip(ip: str) -> bool:
+    pattern = r"^\d{1,3}(\.\d{1,3}){3}$"
+    return bool(re.match(pattern, ip))
+
+
+def scan_for_servers() -> list[str]:
+    """Scan the LAN for iperf3 servers on port 5201, excluding the local IP."""
+    if not shutil.which("nmap"):
+        raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
+
+    # Detect subnet from wlan0
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "addr", "show", "wlan0"],
+            capture_output=True, text=True, timeout=5
+        )
+        cidr = None
+        local_ip = None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                cidr = line.split()[1]
+                local_ip = cidr.split("/")[0]
+                break
+    except Exception:
+        raise RuntimeError("Could not detect subnet from wlan0")
+
+    if not cidr:
+        raise RuntimeError("No IPv4 address found on wlan0")
+
+    result = subprocess.run(
+        ["nmap", "-p", "5201", "--open", "-n", "-oG", "-", cidr],
+        capture_output=True, text=True, timeout=60
+    )
+
+    found = []
+    for line in result.stdout.splitlines():
+        if "5201/open" in line:
+            parts = line.split()
+            if len(parts) >= 2:
+                ip = parts[1]
+                if ip != local_ip:
+                    found.append(ip)
+    return found
+
+
+def run_iperf3(server_ip, duration_minutes, bind_interface, bandwidth_mbps):
+    """Run iperf3 in a background thread, streaming output to output_queue."""
+    global test_process
+
+    max_duration = 86400
+    total_seconds = duration_minutes * 60
+    remaining = total_seconds
+    run_number = 0
+
+    bandwidth_arg = ["-b", f"{bandwidth_mbps}M"] if bandwidth_mbps else []
+
+    try:
+        while remaining > 0:
+            run_number += 1
+            run_seconds = min(remaining, max_duration)
+
+            if total_seconds > max_duration:
+                output_queue.put(f"--- Run {run_number}: {run_seconds}s of {total_seconds}s total ---\n")
+
+            cmd = [
+                      "stdbuf", "-oL",
+                      "iperf3",
+                      "-c", server_ip,
+                      "--bind-dev", bind_interface,
+                      "-t", str(run_seconds),
+                  ] + bandwidth_arg
+
+            output_queue.put(f"$ {' '.join(cmd)}\n")
+
+            with test_lock:
+                test_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+
+            for line in test_process.stdout:
+                output_queue.put(line)
+
+            test_process.wait()
+            rc = test_process.returncode
+
+            with test_lock:
+                test_process = None
+
+            if rc != 0:
+                output_queue.put(f"\niperf3 exited with code {rc}\n")
+                break
+
+            remaining -= run_seconds
+
+        output_queue.put("\nAll iperf3 run(s) completed.\n")
+    except Exception as e:
+        output_queue.put(f"\nError: {e}\n")
+    finally:
+        output_queue.put(None)  # sentinel
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/scan", methods=["POST"])
+def scan():
+    try:
+        servers = scan_for_servers()
+        return jsonify({"servers": servers})
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/start", methods=["POST"])
+def start():
+    global test_process
+
+    with test_lock:
+        if test_process is not None:
+            return jsonify({"error": "A test is already running"}), 409
+
+    data = request.json
+    server_ip = (data.get("server_ip") or "").strip()
+    duration_minutes = int(data.get("duration_minutes") or 60)
+    bind_interface = data.get("bind_interface") or "wlan0"
+    bandwidth_mbps = (data.get("bandwidth_mbps") or "").strip()
+
+    if not server_ip or not is_valid_ip(server_ip):
+        return jsonify({"error": "Invalid server IP address"}), 400
+    if bind_interface not in ("wlan0", "eth0"):
+        return jsonify({"error": "Interface must be wlan0 or eth0"}), 400
+    if duration_minutes < 1:
+        return jsonify({"error": "Duration must be at least 1 minute"}), 400
+
+    # Clear old output
+    while not output_queue.empty():
+        try:
+            output_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    thread = threading.Thread(
+        target=run_iperf3,
+        args=(server_ip, duration_minutes, bind_interface, bandwidth_mbps),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({"status": "started"})
+
+
+@app.route("/stop", methods=["POST"])
+def stop():
+    with test_lock:
+        if test_process is not None:
+            test_process.terminate()
+            return jsonify({"status": "stopped"})
+    return jsonify({"status": "no test running"})
+
+
+@app.route("/stream")
+def stream():
+    def generate():
+        while True:
+            try:
+                line = output_queue.get(timeout=30)
+                if line is None:
+                    break
+                yield "data: " + line.rstrip("\n").replace("\n", "\\n") + "\n\n"
+            except queue.Empty:
+                yield "data: \n\n"  # keepalive
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)

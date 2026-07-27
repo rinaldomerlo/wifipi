@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WIFIMON - WiFi Spectrum & Channel Monitor</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Main Style Sheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-wifi fa-bounce logo-icon"></i>
+                <div class="logo-text">
+                    <h1>WIFI<span>MON</span></h1>
+                    <span class="subtitle">Live Spectrum & Channel Monitor</span>
+                </div>
+            </div>
+            
+            <div class="status-banner" id="statusBanner">
+                <span class="pulse-dot idle" id="statusPulse"></span>
+                <span class="status-text" id="statusText">System Idle</span>
+            </div>
+
+            <div class="header-controls">
+                <div class="control-group">
+                    <label for="ifaceSelect"><i class="fa-solid fa-ethernet"></i> Interface</label>
+                    <select id="ifaceSelect" class="glass-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="refreshSelect"><i class="fa-solid fa-arrows-rotate"></i> Refresh Rate</label>
+                    <select id="refreshSelect" class="glass-select">
+                        <option value="5000" selected>5 Seconds</option>
+                        <option value="10000">10 Seconds</option>
+                        <option value="30000">30 Seconds</option>
+                        <option value="60000">1 Minute</option>
+                        <option value="120000">2 Minutes</option>
+                        <option value="300000">5 Minutes</option>
+                        <option value="manual">Manual Only</option>
+                    </select>
+                </div>
+
+                <div class="btn-group">
+                    <button id="scanBtn" class="btn btn-primary" title="Trigger manual scan">
+                        <i class="fa-solid fa-radar"></i> <span id="scanBtnText">Scan Now</span>
+                    </button>
+                    <button id="pauseBtn" class="btn btn-secondary" title="Pause auto-refresh">
+                        <i class="fa-solid fa-pause"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Layout -->
+        <main class="dashboard-grid">
+            
+            <!-- Statistics Cards -->
+            <section class="stats-row">
+                <div class="stat-card glass-card">
+                    <div class="stat-icon pink-glow"><i class="fa-solid fa-network-wired"></i></div>
+                    <div class="stat-content">
+                        <h3>Total SSIDs</h3>
+                        <div class="stat-value" id="statTotalAps">-</div>
+                        <span class="stat-desc" id="statSourceDesc">No active scan</span>
+                    </div>
+                </div>
+
+
+                <div class="stat-card glass-card">
+                    <div class="stat-icon purple-glow"><i class="fa-solid fa-signal"></i></div>
+                    <div class="stat-content">
+                        <h3>Min Signal</h3>
+                        <div class="stat-value text-purple" id="statMinSignal">-</div>
+                        <span class="stat-desc">Weakest AP signal</span>
+                    </div>
+                </div>
+
+                <div class="stat-card glass-card">
+                    <div class="stat-icon blue-glow"><i class="fa-solid fa-signal"></i></div>
+                    <div class="stat-content">
+                        <h3>Average Signal</h3>
+                        <div class="stat-value text-blue" id="statAvgSignal">-</div>
+                        <span class="stat-desc">Mean signal strength</span>
+                    </div>
+                </div>
+
+                <div class="stat-card glass-card">
+                    <div class="stat-icon green-glow"><i class="fa-solid fa-signal"></i></div>
+                    <div class="stat-content">
+                        <h3>Max Signal</h3>
+                        <div class="stat-value text-green" id="statMaxSignal">-</div>
+                        <span class="stat-desc" id="statLastUpdate">Updated: never</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chart Navigation Tabs -->
+            <section class="tabs-container glass-card">
+                <div class="tabs-header">
+                    <div class="tabs-titles">
+                        <button class="tab-title active" data-tab="spectrum-tab">
+                            <i class="fa-solid fa-chart-area"></i> WiFi Channel Map
+                        </button>
+                        <button class="tab-title" data-tab="utilization-tab">
+                            <i class="fa-solid fa-chart-simple"></i> Channel Utilization
+                        </button>
+                    </div>
+                    
+                    <div class="band-selectors" id="bandSelectors">
+                        <button class="band-btn active" data-band="all">All Bands</button>
+                        <button class="band-btn" data-band="2.4ghz">2.4 GHz</button>
+                        <button class="band-btn" data-band="5ghz">5 GHz</button>
+                        <button class="band-btn" data-band="6ghz" id="btnBand6">6 GHz</button>
+                    </div>
+                </div>
+
+                <!-- Tab 1: Spectrum Graph -->
+                <div class="tab-content active" id="spectrum-tab">
+                    <div class="spectrum-charts">
+                        
+                        <!-- 2.4 GHz Chart Container -->
+                        <div class="chart-wrapper" id="wrapper24">
+                            <div class="chart-header-row">
+                                <span class="chart-title">2.4 GHz Frequency Band</span>
+                                <span class="chart-range">2400 - 2495 MHz</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chart24"></canvas>
+                                <div class="canvas-tooltip" id="tooltip24"></div>
+                            </div>
+                        </div>
+
+                        <!-- 5 GHz Chart Container -->
+                        <div class="chart-wrapper" id="wrapper5">
+                            <div class="chart-header-row">
+                                <span class="chart-title">5 GHz Frequency Band</span>
+                                <span class="chart-range">5150 - 5885 MHz</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chart5"></canvas>
+                                <div class="canvas-tooltip" id="tooltip5"></div>
+                            </div>
+                        </div>
+
+                        <!-- 6 GHz Chart Container (hidden by default) -->
+                        <div class="chart-wrapper" id="wrapper6" style="display: none;">
+                            <div class="chart-header-row">
+                                <span class="chart-title">6 GHz Frequency Band</span>
+                                <span class="chart-range">5925 - 7125 MHz</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chart6"></canvas>
+                                <div class="canvas-tooltip" id="tooltip6"></div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Tab 2: Channel Utilization Bar Chart -->
+                <div class="tab-content" id="utilization-tab">
+                    <div class="utilization-charts">
+                        
+                        <!-- 2.4 GHz Utilization Container -->
+                        <div class="chart-wrapper" id="wrapperUtil24">
+                            <div class="chart-header-row">
+                                <span class="chart-title">2.4 GHz Channel Utilization / Occupancy</span>
+                                <span class="chart-range">Based on reported BSS Load and AP overlap density</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chartUtil24"></canvas>
+                                <div class="canvas-tooltip" id="tooltipUtil24"></div>
+                            </div>
+                        </div>
+
+                        <!-- 5 GHz Utilization Container -->
+                        <div class="chart-wrapper" id="wrapperUtil5">
+                            <div class="chart-header-row">
+                                <span class="chart-title">5 GHz Channel Utilization / Occupancy</span>
+                                <span class="chart-range">Based on reported BSS Load and AP overlap density</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chartUtil5"></canvas>
+                                <div class="canvas-tooltip" id="tooltipUtil5"></div>
+                            </div>
+                        </div>
+
+                        <!-- 6 GHz Utilization Container (hidden by default) -->
+                        <div class="chart-wrapper" id="wrapperUtil6" style="display: none;">
+                            <div class="chart-header-row">
+                                <span class="chart-title">6 GHz Channel Utilization / Occupancy</span>
+                                <span class="chart-range">Based on reported BSS Load and AP overlap density</span>
+                            </div>
+                            <div class="canvas-container">
+                                <canvas id="chartUtil6"></canvas>
+                                <div class="canvas-tooltip" id="tooltipUtil6"></div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            <!-- AP Table / Details List -->
+            <section class="table-container glass-card">
+                <div class="table-header">
+                    <h2><i class="fa-solid fa-list"></i> Access Point Directory</h2>
+                    <div class="table-controls">
+                        <div class="search-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="tableSearch" placeholder="Search SSID, BSSID...">
+                        </div>
+                        <select id="tableFilterSecurity" class="glass-select">
+                            <option value="all">All Security</option>
+                            <option value="open">Open Networks</option>
+                            <option value="wpa3">WPA3</option>
+                            <option value="wpa2">WPA2 / WPA3 Mixed</option>
+                            <option value="wpa">WPA / WPA2</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table id="apTable">
+                        <thead>
+                            <tr>
+                                <th>SSID</th>
+                                <th>BSSID</th>
+                                <th>Signal</th>
+                                <th>Channel</th>
+                                <th>Width</th>
+                                <th>Band</th>
+                                <th>Security</th>
+                            </tr>
+                        </thead>
+                        <tbody id="apTableBody">
+                            <tr>
+                                <td colspan="7" class="table-empty">No scan data available. Trigger a scan above.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Script imports -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

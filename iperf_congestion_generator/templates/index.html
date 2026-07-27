@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPERF3 - Network Congestion Generator</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-glow: 0 0 15px rgba(0, 210, 255, 0.25);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            padding: 1.5rem;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border-color: var(--glass-border-hover);
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+            margin-top: 1.2rem;
+        }
+
+        label:first-of-type {
+            margin-top: 0;
+        }
+
+        label i {
+            margin-right: 4px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.95rem;
+            font-weight: 500;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        select option {
+            background-color: var(--bg-light);
+            color: var(--text-primary);
+        }
+
+        .row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .row input {
+            flex: 1;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.7rem 1.4rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        #btn-scan {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        #btn-scan:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--glass-border-hover);
+        }
+
+        #btn-start {
+            background: linear-gradient(135deg, #00e676 0%, #00c853 100%);
+            color: #08090f;
+            box-shadow: 0 4px 15px rgba(0, 230, 118, 0.25);
+        }
+
+        #btn-start:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 230, 118, 0.4);
+        }
+
+        #btn-stop {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(255, 59, 116, 0.25);
+        }
+
+        #btn-stop:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 59, 116, 0.4);
+        }
+
+        #status-msg {
+            font-size: 0.85rem;
+            color: var(--color-orange);
+            margin-top: 0.75rem;
+            min-height: 1.2em;
+            font-weight: 500;
+        }
+
+        #output {
+            background: rgba(8, 9, 15, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            height: 420px;
+            overflow-y: auto;
+            color: var(--color-green);
+        }
+
+        #scan-results {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        #scan-results button {
+            background: rgba(0, 210, 255, 0.1);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            color: var(--color-blue);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #scan-results button:hover {
+            background: rgba(0, 210, 255, 0.2);
+            border-color: var(--color-blue);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(8, 9, 15, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-bolt fa-bounce logo-icon"></i>
+                <div class="logo-text">
+                    <h1>IPERF<span>3</span></h1>
+                    <span class="subtitle">Network Congestion Generator</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="glass-card">
+            <label for="server-ip"><i class="fa-solid fa-server"></i> Server IP Address</label>
+            <div class="row">
+                <input id="server-ip" type="text" placeholder="e.g. 192.168.1.100">
+                <button id="btn-scan" onclick="scanLAN()"><i class="fa-solid fa-radar"></i> Scan LAN</button>
+            </div>
+            <div id="scan-results"></div>
+
+            <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
+            <input id="duration" type="number" value="60" min="1">
+
+            <label for="interface"><i class="fa-solid fa-ethernet"></i> Bind Interface</label>
+            <select id="interface">
+                <option value="wlan0">wlan0</option>
+                <option value="eth0">eth0</option>
+            </select>
+
+            <label for="bandwidth"><i class="fa-solid fa-gauge-high"></i> Target Bandwidth (Mbps) &mdash; leave blank for unlimited</label>
+            <input id="bandwidth" type="number" placeholder="unlimited" min="1">
+
+            <div class="actions">
+                <button id="btn-start" class="btn" onclick="startTest()"><i class="fa-solid fa-play"></i> Start Test</button>
+                <button id="btn-stop" class="btn" onclick="stopTest()" disabled><i class="fa-solid fa-stop"></i> Stop Test</button>
+            </div>
+            <div id="status-msg"></div>
+        </div>
+
+        <div class="glass-card">
+            <label style="margin-top: 0; margin-bottom: 0.75rem;"><i class="fa-solid fa-terminal"></i> Live Output Stream</label>
+            <div id="output">Output will appear here once the test starts…</div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+
+        function setStatus(msg, color) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.style.color = color || 'var(--color-orange)';
+        }
+
+        function setRunning(running) {
+            document.getElementById('btn-start').disabled = running;
+            document.getElementById('btn-stop').disabled  = !running;
+        }
+
+        async function scanLAN() {
+            const btn = document.getElementById('btn-scan');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning…';
+            setStatus('Scanning LAN for iperf3 servers (port 5201)…', 'var(--color-blue)');
+            document.getElementById('scan-results').innerHTML = '';
+
+            try {
+                const res = await fetch('/scan', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus('Scan error: ' + data.error, 'var(--color-pink)');
+                } else if (!data.servers || data.servers.length === 0) {
+                    setStatus('No iperf3 servers found.');
+                } else {
+                    setStatus('Found ' + data.servers.length + ' server(s). Click one to select it.', 'var(--color-green)');
+                    const div = document.getElementById('scan-results');
+                    data.servers.forEach(ip => {
+                        const b = document.createElement('button');
+                        b.innerHTML = `<i class="fa-solid fa-server"></i> ${ip}`;
+                        b.onclick = () => {
+                            document.getElementById('server-ip').value = ip;
+                            setStatus('Selected: ' + ip, 'var(--color-green)');
+                        };
+                        div.appendChild(b);
+                    });
+                }
+            } catch (e) {
+                setStatus('Scan failed: ' + e, 'var(--color-pink)');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-radar"></i> Scan LAN';
+            }
+        }
+
+        async function startTest() {
+            const serverIp   = document.getElementById('server-ip').value.trim();
+            const duration   = parseInt(document.getElementById('duration').value) || 60;
+            const iface      = document.getElementById('interface').value;
+            const bandwidth  = document.getElementById('bandwidth').value.trim();
+
+            if (!serverIp) { setStatus('Please enter a server IP address.', 'var(--color-pink)'); return; }
+
+            document.getElementById('output').textContent = '';
+            setRunning(true);
+            setStatus('Starting…', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        server_ip: serverIp,
+                        duration_minutes: duration,
+                        bind_interface: iface,
+                        bandwidth_mbps: bandwidth
+                    })
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus('Error: ' + data.error, 'var(--color-pink)');
+                    setRunning(false);
+                    return;
+                }
+            } catch (e) {
+                setStatus('Failed to start: ' + e, 'var(--color-pink)');
+                setRunning(false);
+                return;
+            }
+
+            setStatus('Test running…', 'var(--color-green)');
+            startStream();
+        }
+
+        function startStream() {
+            if (eventSource) eventSource.close();
+            const out = document.getElementById('output');
+            out.textContent = '';
+
+            eventSource = new EventSource('/stream');
+            eventSource.onmessage = (e) => {
+                if (e.data === '') return; // keepalive
+                out.textContent += e.data.replace(/\\n/g, '\n') + '\n';
+                out.scrollTop = out.scrollHeight;
+            };
+            eventSource.onerror = () => {
+                eventSource.close();
+                eventSource = null;
+                setRunning(false);
+                setStatus('Test finished.', 'var(--color-green)');
+            };
+        }
+
+        async function stopTest() {
+            await fetch('/stop', { method: 'POST' });
+            if (eventSource) { eventSource.close(); eventSource = null; }
+            setRunning(false);
+            setStatus('Test stopped.', 'var(--color-orange)');
+        }
+    </script>
+</body>
+</html>
