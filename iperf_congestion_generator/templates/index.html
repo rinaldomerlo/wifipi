@@ -370,10 +370,10 @@
                 </div>
                 <div style="flex: 1; min-width: 100px; max-width: 140px;">
                     <label for="server-port" style="margin-top: 0;"><i class="fa-solid fa-network-wired"></i> Port</label>
-                    <input id="server-port" type="number" value="5201" min="1" max="65535" placeholder="5201">
+                    <input id="server-port" type="number" min="1" max="65535" placeholder="e.g. 5201">
                 </div>
                 <div style="margin-bottom: 2px;">
-                    <button id="btn-scan" class="btn" onclick="scanLAN()"><i class="fa-solid fa-radar"></i> Scan LAN</button>
+                    <button id="btn-scan" class="btn" onclick="scanLAN()" title="Scan LAN for iperf3 servers on ports 5201-5210"><i class="fa-solid fa-radar"></i> Scan LAN</button>
                 </div>
             </div>
             <div id="scan-results"></div>
