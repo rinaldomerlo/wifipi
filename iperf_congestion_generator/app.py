@@ -26,17 +26,18 @@ def is_valid_ip(ip: str) -> bool:
     return bool(re.match(pattern, ip))
 
 
-def scan_for_servers(ports: str = "5201-5210") -> list[dict]:
-    """Scan the LAN for iperf3 servers on port range 5201-5210, excluding local host IPs."""
+def scan_for_servers(bind_interface: str = "wlan0", ports: str = "5201-5210") -> list[dict]:
+    """Scan the LAN for iperf3 servers on port range 5201-5210 specifically on bind_interface, excluding local host IPs."""
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    local_ips = set()
-    cidrs = set()
+    if bind_interface not in ("wlan0", "eth0"):
+        bind_interface = "wlan0"
 
+    local_ips = set()
     local_ips.add("127.0.0.1")
 
-    # Detect active subnets and local host IPs
+    # Collect local host IPs across all interfaces
     try:
         result = subprocess.run(
             ["ip", "-4", "addr", "show"],
@@ -53,30 +54,40 @@ def scan_for_servers(ports: str = "5201-5210") -> list[dict]:
                         ip_str = str(iface_obj.ip)
                         if not ip_str.startswith("127."):
                             local_ips.add(ip_str)
-                            net_str = str(iface_obj.network)
-                            cidrs.add(net_str)
                     except Exception:
                         pass
     except Exception:
         pass
 
-    if not cidrs:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-            if local_ip and not local_ip.startswith("127."):
-                local_ips.add(local_ip)
-                net_str = str(ipaddress.ip_network(f"{local_ip}/24", strict=False))
-                cidrs.add(net_str)
-        except Exception:
-            pass
+    # Detect CIDR subnet specifically for bind_interface
+    cidr = None
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "addr", "show", bind_interface],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                parts = line.split()
+                if len(parts) >= 2:
+                    cidr_str = parts[1]
+                    try:
+                        iface_obj = ipaddress.ip_interface(cidr_str)
+                        ip_str = str(iface_obj.ip)
+                        if not ip_str.startswith("127."):
+                            local_ips.add(ip_str)
+                            cidr = str(iface_obj.network)
+                            break
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
-    if not cidrs:
-        raise RuntimeError("No IPv4 address found on active network interface")
+    if not cidr:
+        raise RuntimeError(f"No active IPv4 address found on interface {bind_interface}")
 
-    cmd = ["nmap", "-Pn", "-p", ports, "--open", "-n", "-T4", "-oG", "-"] + sorted(list(cidrs))
+    cmd = ["nmap", "-e", bind_interface, "-Pn", "-p", ports, "--open", "-n", "-T4", "-oG", "-", cidr]
     result = subprocess.run(
         cmd,
         capture_output=True, text=True, timeout=60
@@ -173,7 +184,9 @@ def index():
 @app.route("/scan", methods=["POST"])
 def scan():
     try:
-        servers = scan_for_servers()
+        data = request.get_json(silent=True) or {}
+        bind_interface = data.get("bind_interface") or "wlan0"
+        servers = scan_for_servers(bind_interface=bind_interface)
         return jsonify({"servers": servers})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 500

@@ -421,18 +421,23 @@
             const btn = document.getElementById('btn-scan');
             btn.disabled = true;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning…';
-            setStatus('Scanning LAN for iperf3 servers (ports 5201-5210)…', 'var(--color-blue)');
+            const iface = document.getElementById('interface').value || 'wlan0';
+            setStatus(`Scanning LAN on ${iface} for iperf3 servers (ports 5201-5210)…`, 'var(--color-blue)');
             document.getElementById('scan-results').innerHTML = '';
 
             try {
-                const res = await fetch('scan', { method: 'POST' });
+                const res = await fetch('scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bind_interface: iface })
+                });
                 const data = await res.json();
                 if (data.error) {
                     setStatus('Scan error: ' + data.error, 'var(--color-pink)');
                 } else if (!data.servers || data.servers.length === 0) {
-                    setStatus('No iperf3 servers found.');
+                    setStatus(`No iperf3 servers found on ${iface}.`);
                 } else {
-                    setStatus('Found ' + data.servers.length + ' server target(s). Click one to select it.', 'var(--color-green)');
+                    setStatus(`Found ${data.servers.length} server target(s) on ${iface}. Click one to select it.`, 'var(--color-green)');
                     const div = document.getElementById('scan-results');
                     data.servers.forEach(item => {
                         const ip = typeof item === 'object' ? item.ip : item;

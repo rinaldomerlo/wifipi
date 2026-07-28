@@ -93,13 +93,19 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
 
         mock_sub_run.side_effect = side_effect
 
-        servers = gen_app_module.scan_for_servers()
+        servers = gen_app_module.scan_for_servers(bind_interface="wlan0")
         self.assertEqual(len(servers), 4)
         self.assertNotIn({"ip": "192.168.1.50", "port": 5201}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5201}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5202}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5204}, servers)
         self.assertIn({"ip": "192.168.1.105", "port": 5203}, servers)
+
+        # Verify nmap command contains -e wlan0
+        nmap_call_args = [call for call in mock_sub_run.call_args_list if call[0][0][0] == 'nmap']
+        self.assertTrue(len(nmap_call_args) > 0)
+        self.assertIn('-e', nmap_call_args[0][0][0])
+        self.assertIn('wlan0', nmap_call_args[0][0][0])
 
     def test_stop_route(self):
         response = self.client.post('/stop')
