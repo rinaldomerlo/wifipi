@@ -44,6 +44,11 @@ Project Root Structure:
 ### C. iPerf3 Server Manager (`iperf_server_manager`)
 - **Purpose**: Provides a web interface to discover, launch, stop, restart, and monitor running `iperf3` server daemons and systemd service units (e.g. `iperf3-5202.service`).
 - **Management Capabilities**: Discovers active processes via `ps`, parses port numbers, manages systemd services via `systemctl`, and verifies port availability matrix.
+- **System Privilege Requirement**: Controls systemd service units via `sudo systemctl [start|stop|restart] iperf3*`.
+  - *Sudoers Rule*: Requires passwordless sudo configuration for systemctl commands when running under a non-root account:
+    ```text
+    <username> ALL=(ALL) NOPASSWD: /usr/bin/systemctl start iperf3*, /usr/bin/systemctl stop iperf3*, /usr/bin/systemctl restart iperf3*, /usr/bin/systemctl is-active iperf3*
+    ```
 
 ---
 
@@ -78,5 +83,5 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
 
 ## 5. Maintenance & History Notes
 
-- **Git Repository State**: The repository was re-initialized with a clean initial commit to purge all historical references to legacy test frameworks (`etienne_test_framework`). All references are strictly sanitized.
+- **Git Repository State**: The repository was re-initialized with a clean initial commit to purge all historical references.
 - **Python Environment**: Managed via a shared virtual environment (`.venv`) at `/opt/wifipi/.venv`.

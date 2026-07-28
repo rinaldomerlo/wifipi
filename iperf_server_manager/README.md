@@ -27,6 +27,18 @@ Open **http://<pi-ip>:5002** in a web browser.
 
 ---
 
+## System Privileges & Sudo Setup
+
+Managing systemd services (`iperf3.service`, `iperf3-5202.service`, etc.) via `systemctl start/stop/restart` requires root or passwordless sudo privileges when the app runs under a non-root user (e.g. `jenkins` or `pi`).
+
+Add the following rule to `/etc/sudoers` using `sudo visudo` (replace `youruser` with the app execution user):
+
+```text
+youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl start iperf3*, /usr/bin/systemctl stop iperf3*, /usr/bin/systemctl restart iperf3*, /usr/bin/systemctl is-active iperf3*
+```
+
+---
+
 ## API Endpoints
 
 - `GET /api/servers` — Returns list of running iperf3 processes and detected systemd units.

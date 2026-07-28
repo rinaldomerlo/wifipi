@@ -50,19 +50,24 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Step 3: Configure Passwordless Sudo for WiFi Scanning
+### Step 3: Configure Passwordless Sudo (WiFi Monitor & iPerf Server Manager)
 
-The WiFi Utilization Monitor executes `sudo iw dev <interface> scan` to collect live wireless scan data. To allow the app user (e.g. `$USER`, `jenkins`, or `pi`) to run scans without a password prompt:
+The platform applications require administrative privileges for specific system-level commands when executed under a non-root user (e.g. `$USER`, `jenkins`, or `pi`):
+1. **WiFi Utilization Monitor**: Executes `sudo iw dev <interface> scan` to collect live wireless scan data.
+2. **iPerf3 Server Manager**: Executes `sudo systemctl [start|stop|restart]` to manage `iperf3` server systemd service units.
+
+To allow the app user to execute these commands without a password prompt:
 
 1. Open sudoers configuration:
    ```bash
    sudo visudo
    ```
-2. Add the following rule at the end of the file (replace `$USER` with your actual username if needed):
+2. Add the following rules at the end of the file (replace `$USER` with your actual username if needed):
    ```text
    $USER ALL=(ALL) NOPASSWD: /usr/sbin/iw
+   $USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start iperf3*, /usr/bin/systemctl stop iperf3*, /usr/bin/systemctl restart iperf3*, /usr/bin/systemctl is-active iperf3*, /bin/systemctl start iperf3*, /bin/systemctl stop iperf3*, /bin/systemctl restart iperf3*, /bin/systemctl is-active iperf3*
    ```
-   *(Verify absolute path with `which iw`)*
+   *(Verify absolute binary paths on your distribution using `which iw` and `which systemctl`)*
 
 ### Step 4: Set Up Systemd Services
 
