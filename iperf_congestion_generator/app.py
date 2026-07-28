@@ -9,6 +9,7 @@ import threading
 import queue
 import shutil
 import re
+import socket
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 
 app = Flask(__name__)
@@ -24,14 +25,13 @@ def is_valid_ip(ip: str) -> bool:
     return bool(re.match(pattern, ip))
 
 
-def scan_for_servers(ports: str = "5201-5209") -> list[dict]:
-    """Scan the LAN for iperf3 servers on port range 5201-5209, excluding the local IP."""
+def scan_for_servers(ports: str = "5201-5210") -> list[dict]:
+    """Scan the LAN for iperf3 servers on port range 5201-5210."""
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    # Detect subnet from wlan0 or eth0
+    # Detect subnet from wlan0, eth0, or active network interface
     cidr = None
-    local_ip = None
     for iface in ["wlan0", "eth0"]:
         try:
             result = subprocess.run(
@@ -42,7 +42,6 @@ def scan_for_servers(ports: str = "5201-5209") -> list[dict]:
                 line = line.strip()
                 if line.startswith("inet "):
                     cidr = line.split()[1]
-                    local_ip = cidr.split("/")[0]
                     break
             if cidr:
                 break
@@ -50,10 +49,36 @@ def scan_for_servers(ports: str = "5201-5209") -> list[dict]:
             pass
 
     if not cidr:
-        raise RuntimeError("No IPv4 address found on wlan0 or eth0")
+        try:
+            result = subprocess.run(
+                ["ip", "-4", "addr", "show"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("inet ") and not line.startswith("inet 127."):
+                    cidr = line.split()[1]
+                    break
+        except Exception:
+            pass
+
+    if not cidr:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            if local_ip and not local_ip.startswith("127."):
+                parts = local_ip.split(".")
+                cidr = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+        except Exception:
+            pass
+
+    if not cidr:
+        raise RuntimeError("No IPv4 address found on active network interface")
 
     result = subprocess.run(
-        ["nmap", "-p", ports, "--open", "-n", "-oG", "-", cidr],
+        ["nmap", "-Pn", "-p", ports, "--open", "-n", "-T4", "-oG", "-", cidr],
         capture_output=True, text=True, timeout=60
     )
 
@@ -63,10 +88,18 @@ def scan_for_servers(ports: str = "5201-5209") -> list[dict]:
             parts = line.split()
             if len(parts) >= 2:
                 ip = parts[1]
-                if ip != local_ip:
-                    open_ports = re.findall(r'(\d+)/open', line)
-                    for port_str in open_ports:
-                        found.append({"ip": ip, "port": int(port_str)})
+                open_ports = re.findall(r'(\d+)/open', line)
+                for port_str in open_ports:
+                    found.append({"ip": ip, "port": int(port_str)})
+
+    def ip_key(item):
+        ip_str = item["ip"]
+        try:
+            return (0, socket.inet_aton(ip_str), item["port"])
+        except Exception:
+            return (1, ip_str, item["port"])
+
+    found.sort(key=ip_key)
     return found
 
 

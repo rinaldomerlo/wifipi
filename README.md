@@ -115,23 +115,18 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/` and `/iperf/` to the respective backend Flask apps.
 
-1. Ensure the static web directory `/opt/wifipi/www` has readable permissions for Nginx (`www-data`):
-   ```bash
-   sudo chmod -R 755 /opt/wifipi/www
-   ```
-
-2. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`:
+1. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`:
    ```bash
    sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/wifipi
    ```
 
-3. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
+2. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
    ```bash
    sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
 
-4. Test the Nginx configuration and restart Nginx:
+3. Test the Nginx configuration and restart Nginx:
    ```bash
    sudo nginx -t
    sudo systemctl restart nginx

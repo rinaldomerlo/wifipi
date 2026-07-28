@@ -26,7 +26,7 @@ Then open **http://<pi-ip>:5001** in a browser.
 
 | Feature | Detail |
 |---|---|
-| Server IP & Port | Type manually (or IP:Port) or click **Scan LAN** to discover iperf3 servers on ports 5201-5209 |
+| Server IP & Port | Type manually (or IP:Port) or click **Scan LAN** to discover iperf3 servers on ports 5201-5210 |
 | Duration | Minutes; automatically loops in 24 h chunks for runs > 24 h |
 | Interface | `wlan0` or `eth0` |
 | Bandwidth | Mbps target, or leave blank for unlimited |

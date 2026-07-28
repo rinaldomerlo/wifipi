@@ -94,7 +94,8 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         mock_sub_run.side_effect = side_effect
 
         servers = gen_app_module.scan_for_servers()
-        self.assertEqual(len(servers), 4)
+        self.assertEqual(len(servers), 5)
+        self.assertIn({"ip": "192.168.1.50", "port": 5201}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5201}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5202}, servers)
         self.assertIn({"ip": "192.168.1.100", "port": 5204}, servers)
