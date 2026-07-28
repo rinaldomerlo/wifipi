@@ -17,6 +17,19 @@ server {
         try_files $uri $uri/ =404;
     }
 
+    # Automatic redirect to trailing-slash URLs for subpath apps
+    location = /wifimon {
+        return 301 /wifimon/;
+    }
+
+    location = /iperf {
+        return 301 /iperf/;
+    }
+
+    location = /iperfserver {
+        return 301 /iperfserver/;
+    }
+
     # WiFi Channel & Utilization Monitor subpath (/wifimon/)
     location /wifimon/ {
         proxy_pass http://127.0.0.1:5000/;

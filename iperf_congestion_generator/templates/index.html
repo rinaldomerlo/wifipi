@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Subpath URL normalization: redirect /iperf to /iperf/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IPERF3 - Network Congestion Generator</title>
