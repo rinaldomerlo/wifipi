@@ -24,48 +24,53 @@ def is_valid_ip(ip: str) -> bool:
     return bool(re.match(pattern, ip))
 
 
-def scan_for_servers() -> list[str]:
-    """Scan the LAN for iperf3 servers on port 5201, excluding the local IP."""
+def scan_for_servers(ports: str = "5201-5209") -> list[dict]:
+    """Scan the LAN for iperf3 servers on port range 5201-5209, excluding the local IP."""
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    # Detect subnet from wlan0
-    try:
-        result = subprocess.run(
-            ["ip", "-4", "addr", "show", "wlan0"],
-            capture_output=True, text=True, timeout=5
-        )
-        cidr = None
-        local_ip = None
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("inet "):
-                cidr = line.split()[1]
-                local_ip = cidr.split("/")[0]
+    # Detect subnet from wlan0 or eth0
+    cidr = None
+    local_ip = None
+    for iface in ["wlan0", "eth0"]:
+        try:
+            result = subprocess.run(
+                ["ip", "-4", "addr", "show", iface],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("inet "):
+                    cidr = line.split()[1]
+                    local_ip = cidr.split("/")[0]
+                    break
+            if cidr:
                 break
-    except Exception:
-        raise RuntimeError("Could not detect subnet from wlan0")
+        except Exception:
+            pass
 
     if not cidr:
-        raise RuntimeError("No IPv4 address found on wlan0")
+        raise RuntimeError("No IPv4 address found on wlan0 or eth0")
 
     result = subprocess.run(
-        ["nmap", "-p", "5201", "--open", "-n", "-oG", "-", cidr],
+        ["nmap", "-p", ports, "--open", "-n", "-oG", "-", cidr],
         capture_output=True, text=True, timeout=60
     )
 
     found = []
     for line in result.stdout.splitlines():
-        if "5201/open" in line:
+        if line.startswith("Host:") and "/open" in line:
             parts = line.split()
             if len(parts) >= 2:
                 ip = parts[1]
                 if ip != local_ip:
-                    found.append(ip)
+                    open_ports = re.findall(r'(\d+)/open', line)
+                    for port_str in open_ports:
+                        found.append({"ip": ip, "port": int(port_str)})
     return found
 
 
-def run_iperf3(server_ip, duration_minutes, bind_interface, bandwidth_mbps):
+def run_iperf3(server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps):
     """Run iperf3 in a background thread, streaming output to output_queue."""
     global test_process
 
@@ -88,6 +93,7 @@ def run_iperf3(server_ip, duration_minutes, bind_interface, bandwidth_mbps):
                       "stdbuf", "-oL",
                       "iperf3",
                       "-c", server_ip,
+                      "-p", str(server_port),
                       "--bind-dev", bind_interface,
                       "-t", str(run_seconds),
                   ] + bandwidth_arg
@@ -147,14 +153,36 @@ def start():
         if test_process is not None:
             return jsonify({"error": "A test is already running"}), 409
 
-    data = request.json
-    server_ip = (data.get("server_ip") or "").strip()
-    duration_minutes = int(data.get("duration_minutes") or 60)
+    data = request.json or {}
+    raw_server_ip = (data.get("server_ip") or "").strip()
+    raw_server_port = data.get("server_port") or 5201
+
+    if ":" in raw_server_ip:
+        parts = raw_server_ip.split(":", 1)
+        server_ip = parts[0].strip()
+        try:
+            server_port = int(parts[1].strip())
+        except ValueError:
+            server_port = 5201
+    else:
+        server_ip = raw_server_ip
+        try:
+            server_port = int(raw_server_port)
+        except (ValueError, TypeError):
+            server_port = 5201
+
+    try:
+        duration_minutes = int(data.get("duration_minutes") or 60)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Duration must be an integer"}), 400
+
     bind_interface = data.get("bind_interface") or "wlan0"
-    bandwidth_mbps = (data.get("bandwidth_mbps") or "").strip()
+    bandwidth_mbps = str(data.get("bandwidth_mbps") or "").strip()
 
     if not server_ip or not is_valid_ip(server_ip):
         return jsonify({"error": "Invalid server IP address"}), 400
+    if not (1 <= server_port <= 65535):
+        return jsonify({"error": "Server port must be between 1 and 65535"}), 400
     if bind_interface not in ("wlan0", "eth0"):
         return jsonify({"error": "Interface must be wlan0 or eth0"}), 400
     if duration_minutes < 1:
@@ -169,7 +197,7 @@ def start():
 
     thread = threading.Thread(
         target=run_iperf3,
-        args=(server_ip, duration_minutes, bind_interface, bandwidth_mbps),
+        args=(server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps),
         daemon=True
     )
     thread.start()

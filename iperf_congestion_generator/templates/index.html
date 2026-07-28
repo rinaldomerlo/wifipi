@@ -359,17 +359,22 @@
             </div>
             <div class="nav-links">
                 <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
-                <a href="/wifimon/" class="nav-btn"><i class="fa-solid fa-wifi"></i> WiFi Monitor</a>
-                <a href="/iperf/" class="nav-btn active"><i class="fa-solid fa-gauge-high"></i> iPerf Generator</a>
-                <a href="/iperfserver/" class="nav-btn"><i class="fa-solid fa-server"></i> Server Manager</a>
             </div>
         </header>
 
         <div class="glass-card">
-            <label for="server-ip"><i class="fa-solid fa-server"></i> Server IP Address</label>
-            <div class="row">
-                <input id="server-ip" type="text" placeholder="e.g. 192.168.1.100">
-                <button id="btn-scan" onclick="scanLAN()"><i class="fa-solid fa-radar"></i> Scan LAN</button>
+            <div class="row" style="align-items: flex-end; flex-wrap: wrap;">
+                <div style="flex: 2; min-width: 180px;">
+                    <label for="server-ip" style="margin-top: 0;"><i class="fa-solid fa-server"></i> Server IP Address</label>
+                    <input id="server-ip" type="text" placeholder="e.g. 192.168.1.100">
+                </div>
+                <div style="flex: 1; min-width: 100px; max-width: 140px;">
+                    <label for="server-port" style="margin-top: 0;"><i class="fa-solid fa-network-wired"></i> Port</label>
+                    <input id="server-port" type="number" value="5201" min="1" max="65535" placeholder="5201">
+                </div>
+                <div style="margin-bottom: 2px;">
+                    <button id="btn-scan" class="btn" onclick="scanLAN()"><i class="fa-solid fa-radar"></i> Scan LAN</button>
+                </div>
             </div>
             <div id="scan-results"></div>
 
@@ -416,7 +421,7 @@
             const btn = document.getElementById('btn-scan');
             btn.disabled = true;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning…';
-            setStatus('Scanning LAN for iperf3 servers (port 5201)…', 'var(--color-blue)');
+            setStatus('Scanning LAN for iperf3 servers (ports 5201-5209)…', 'var(--color-blue)');
             document.getElementById('scan-results').innerHTML = '';
 
             try {
@@ -427,14 +432,17 @@
                 } else if (!data.servers || data.servers.length === 0) {
                     setStatus('No iperf3 servers found.');
                 } else {
-                    setStatus('Found ' + data.servers.length + ' server(s). Click one to select it.', 'var(--color-green)');
+                    setStatus('Found ' + data.servers.length + ' server target(s). Click one to select it.', 'var(--color-green)');
                     const div = document.getElementById('scan-results');
-                    data.servers.forEach(ip => {
+                    data.servers.forEach(item => {
+                        const ip = typeof item === 'object' ? item.ip : item;
+                        const port = typeof item === 'object' ? item.port : 5201;
                         const b = document.createElement('button');
-                        b.innerHTML = `<i class="fa-solid fa-server"></i> ${ip}`;
+                        b.innerHTML = `<i class="fa-solid fa-server"></i> ${ip}:${port}`;
                         b.onclick = () => {
                             document.getElementById('server-ip').value = ip;
-                            setStatus('Selected: ' + ip, 'var(--color-green)');
+                            document.getElementById('server-port').value = port;
+                            setStatus(`Selected target: ${ip}:${port}`, 'var(--color-green)');
                         };
                         div.appendChild(b);
                     });
@@ -448,16 +456,23 @@
         }
 
         async function startTest() {
-            const serverIp   = document.getElementById('server-ip').value.trim();
+            let serverIp   = document.getElementById('server-ip').value.trim();
+            let serverPort = parseInt(document.getElementById('server-port').value) || 5201;
             const duration   = parseInt(document.getElementById('duration').value) || 60;
             const iface      = document.getElementById('interface').value;
             const bandwidth  = document.getElementById('bandwidth').value.trim();
 
             if (!serverIp) { setStatus('Please enter a server IP address.', 'var(--color-pink)'); return; }
 
+            if (serverIp.includes(':')) {
+                const parts = serverIp.split(':');
+                serverIp = parts[0];
+                serverPort = parseInt(parts[1]) || serverPort;
+            }
+
             document.getElementById('output').textContent = '';
             setRunning(true);
-            setStatus('Starting…', 'var(--color-blue)');
+            setStatus(`Starting test against ${serverIp}:${serverPort}…`, 'var(--color-blue)');
 
             try {
                 const res = await fetch('start', {
@@ -465,6 +480,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         server_ip: serverIp,
+                        server_port: serverPort,
                         duration_minutes: duration,
                         bind_interface: iface,
                         bandwidth_mbps: bandwidth
@@ -482,7 +498,7 @@
                 return;
             }
 
-            setStatus('Test running…', 'var(--color-green)');
+            setStatus(`Test running against ${serverIp}:${serverPort}…`, 'var(--color-green)');
             startStream();
         }
 
