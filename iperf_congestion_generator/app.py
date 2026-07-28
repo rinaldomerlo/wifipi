@@ -10,6 +10,7 @@ import queue
 import shutil
 import re
 import socket
+import ipaddress
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 
 app = Flask(__name__)
@@ -26,59 +27,58 @@ def is_valid_ip(ip: str) -> bool:
 
 
 def scan_for_servers(ports: str = "5201-5210") -> list[dict]:
-    """Scan the LAN for iperf3 servers on port range 5201-5210."""
+    """Scan the LAN for iperf3 servers on port range 5201-5210, excluding local host IPs."""
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    # Detect subnet from wlan0, eth0, or active network interface
-    cidr = None
-    for iface in ["wlan0", "eth0"]:
-        try:
-            result = subprocess.run(
-                ["ip", "-4", "addr", "show", iface],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line.startswith("inet "):
-                    cidr = line.split()[1]
-                    break
-            if cidr:
-                break
-        except Exception:
-            pass
+    local_ips = set()
+    cidrs = set()
 
-    if not cidr:
-        try:
-            result = subprocess.run(
-                ["ip", "-4", "addr", "show"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line.startswith("inet ") and not line.startswith("inet 127."):
-                    cidr = line.split()[1]
-                    break
-        except Exception:
-            pass
+    local_ips.add("127.0.0.1")
 
-    if not cidr:
+    # Detect active subnets and local host IPs
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "addr", "show"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                parts = line.split()
+                if len(parts) >= 2:
+                    cidr_str = parts[1]
+                    try:
+                        iface_obj = ipaddress.ip_interface(cidr_str)
+                        ip_str = str(iface_obj.ip)
+                        if not ip_str.startswith("127."):
+                            local_ips.add(ip_str)
+                            net_str = str(iface_obj.network)
+                            cidrs.add(net_str)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    if not cidrs:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
             s.close()
             if local_ip and not local_ip.startswith("127."):
-                parts = local_ip.split(".")
-                cidr = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+                local_ips.add(local_ip)
+                net_str = str(ipaddress.ip_network(f"{local_ip}/24", strict=False))
+                cidrs.add(net_str)
         except Exception:
             pass
 
-    if not cidr:
+    if not cidrs:
         raise RuntimeError("No IPv4 address found on active network interface")
 
+    cmd = ["nmap", "-Pn", "-p", ports, "--open", "-n", "-T4", "-oG", "-"] + sorted(list(cidrs))
     result = subprocess.run(
-        ["nmap", "-Pn", "-p", ports, "--open", "-n", "-T4", "-oG", "-", cidr],
+        cmd,
         capture_output=True, text=True, timeout=60
     )
 
@@ -88,9 +88,10 @@ def scan_for_servers(ports: str = "5201-5210") -> list[dict]:
             parts = line.split()
             if len(parts) >= 2:
                 ip = parts[1]
-                open_ports = re.findall(r'(\d+)/open', line)
-                for port_str in open_ports:
-                    found.append({"ip": ip, "port": int(port_str)})
+                if ip not in local_ips:
+                    open_ports = re.findall(r'(\d+)/open', line)
+                    for port_str in open_ports:
+                        found.append({"ip": ip, "port": int(port_str)})
 
     def ip_key(item):
         ip_str = item["ip"]
