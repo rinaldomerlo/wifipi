@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iPerf3 Server Manager - WiFiPi</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.1rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover, .nav-btn.active {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .card-header-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .card-header-title h2 {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: var(--text-primary);
+        }
+
+        .card-header-title h2 i {
+            color: var(--color-blue);
+        }
+
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-box {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--color-blue);
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.4rem;
+            margin-top: 1rem;
+        }
+
+        label:first-of-type {
+            margin-top: 0;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.7rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        .row-group {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.88rem;
+            padding: 0.65rem 1.2rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn-green {
+            background: linear-gradient(135deg, #00e676 0%, #00c853 100%);
+            color: #08090f;
+            box-shadow: 0 4px 12px rgba(0, 230, 118, 0.2);
+        }
+
+        .btn-green:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 230, 118, 0.35);
+        }
+
+        .btn-red {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(255, 59, 116, 0.2);
+        }
+
+        .btn-red:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(255, 59, 116, 0.35);
+        }
+
+        .btn-blue {
+            background: linear-gradient(135deg, var(--color-blue) 0%, #0091ea 100%);
+            color: #08090f;
+            box-shadow: 0 4px 12px rgba(0, 210, 255, 0.2);
+        }
+
+        .btn-blue:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 210, 255, 0.35);
+        }
+
+        .btn-sm {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.8rem;
+            border-radius: 8px;
+        }
+
+        .quick-ports {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+
+        .quick-port-chip {
+            background: rgba(0, 210, 255, 0.08);
+            border: 1px solid rgba(0, 210, 255, 0.25);
+            color: var(--color-blue);
+            padding: 0.3rem 0.7rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .quick-port-chip:hover {
+            background: rgba(0, 210, 255, 0.2);
+            border-color: var(--color-blue);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-active {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--color-green);
+            border: 1px solid rgba(0, 230, 118, 0.3);
+        }
+
+        .badge-inactive {
+            background: rgba(255, 59, 116, 0.15);
+            color: var(--color-pink);
+            border: 1px solid rgba(255, 59, 116, 0.3);
+        }
+
+        .badge-other {
+            background: rgba(255, 145, 0, 0.15);
+            color: var(--color-orange);
+            border: 1px solid rgba(255, 145, 0, 0.3);
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        th {
+            padding: 0.75rem 1rem;
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--glass-border);
+            vertical-align: middle;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .cmd-text {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #status-bar {
+            font-size: 0.85rem;
+            min-height: 1.4em;
+            font-weight: 500;
+        }
+
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Checkbox styling */
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 1rem;
+        }
+
+        .checkbox-container input {
+            width: auto;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-server logo-icon"></i>
+                <div class="logo-text">
+                    <h1>IPERF<span>3</span></h1>
+                    <span class="subtitle">Server Daemon Manager</span>
+                </div>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+                <a href="/wifimon/" class="nav-btn"><i class="fa-solid fa-wifi"></i> WiFi Monitor</a>
+                <a href="/iperf/" class="nav-btn"><i class="fa-solid fa-gauge-high"></i> iPerf Generator</a>
+                <a href="/iperfserver/" class="nav-btn active"><i class="fa-solid fa-server"></i> Server Manager</a>
+            </div>
+        </header>
+
+        <!-- Summary Statistics -->
+        <div class="stats-summary">
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-play"></i> Running iPerf3 Servers</span>
+                <span id="stat-running-count" class="stat-value">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-gear"></i> Systemd Services</span>
+                <span id="stat-systemd-count" class="stat-value">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-network-wired"></i> Active Ports</span>
+                <span id="stat-active-ports" class="stat-value" style="font-size: 1.1rem; padding-top: 0.3rem;">None</span>
+            </div>
+        </div>
+
+        <!-- Controls Bar -->
+        <div class="glass-card" style="padding: 1rem 1.5rem;">
+            <div class="controls-bar">
+                <div id="status-bar" style="color: var(--color-blue);">
+                    <i class="fa-solid fa-sync fa-spin"></i> Initializing server status...
+                </div>
+                <div class="row-group">
+                    <button class="btn btn-blue btn-sm" onclick="refreshAll()"><i class="fa-solid fa-rotate-right"></i> Refresh Now</button>
+                    <select id="auto-refresh-interval" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.8rem;" onchange="updateAutoRefresh()">
+                        <option value="0">Auto-refresh: Off</option>
+                        <option value="5" selected>Auto-refresh: 5s</option>
+                        <option value="10">Auto-refresh: 10s</option>
+                        <option value="30">Auto-refresh: 30s</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- Systemd Managed Services -->
+            <div class="glass-card">
+                <div class="card-header-title">
+                    <h2><i class="fa-solid fa-cubes"></i> Systemd Services</h2>
+                    <span class="badge badge-active" id="systemd-badge">Managed</span>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Unit Name</th>
+                                <th>Port</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="systemd-list">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">Loading systemd units...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Start New Server Form -->
+            <div class="glass-card">
+                <div class="card-header-title">
+                    <h2><i class="fa-solid fa-plus-circle"></i> Launch New iPerf3 Server</h2>
+                </div>
+                <div>
+                    <label for="server-port"><i class="fa-solid fa-hashtag"></i> Port Number</label>
+                    <input id="server-port" type="number" value="5201" min="1" max="65535" placeholder="5201">
+                    <div class="quick-ports">
+                        <span style="font-size: 0.75rem; color: var(--text-secondary); align-self: center;">Quick Select:</span>
+                        <span class="quick-port-chip" onclick="setPort(5201)">5201 (Default)</span>
+                        <span class="quick-port-chip" onclick="setPort(5202)">5202</span>
+                        <span class="quick-port-chip" onclick="setPort(5203)">5203</span>
+                        <span class="quick-port-chip" onclick="setPort(5204)">5204</span>
+                        <span class="quick-port-chip" onclick="setPort(5205)">5205</span>
+                    </div>
+
+                    <label for="server-interval"><i class="fa-solid fa-clock"></i> Report Interval (-i seconds)</label>
+                    <input id="server-interval" type="number" value="0" min="0" placeholder="0 (disabled)">
+
+                    <label for="server-bind"><i class="fa-solid fa-network-wired"></i> Bind IP Address (Optional)</label>
+                    <input id="server-bind" type="text" placeholder="e.g. 0.0.0.0 or 192.168.1.50">
+
+                    <label class="checkbox-container">
+                        <input id="server-oneoff" type="checkbox">
+                        <span>One-off mode (-1, exit after 1 client connection)</span>
+                    </label>
+
+                    <div style="margin-top: 1.5rem;">
+                        <button class="btn btn-green" onclick="startServer()"><i class="fa-solid fa-play"></i> Launch Server Daemon</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Active Processes Table -->
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-list-check"></i> Active iPerf3 Server Processes</h2>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Port</th>
+                            <th>PID</th>
+                            <th>User</th>
+                            <th>Uptime</th>
+                            <th>Command Line</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="processes-list">
+                        <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">Loading active processes...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Port Status Matrix -->
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-table-cells"></i> Common Ports Overview (5201 - 5210)</h2>
+            </div>
+            <div class="quick-ports" id="port-matrix" style="gap: 0.75rem;">
+                <!-- Filled dynamically -->
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let autoRefreshTimer = null;
+
+        function showStatus(msg, color) {
+            const sb = document.getElementById('status-bar');
+            sb.innerHTML = msg;
+            sb.style.color = color || 'var(--color-blue)';
+        }
+
+        function setPort(p) {
+            document.getElementById('server-port').value = p;
+        }
+
+        async function fetchServers() {
+            try {
+                const res = await fetch('api/servers');
+                const data = await res.json();
+
+                if (!data.success) {
+                    showStatus('<i class="fa-solid fa-triangle-exclamation"></i> Error loading servers: ' + (data.error || 'Unknown error'), 'var(--color-pink)');
+                    return;
+                }
+
+                // Update Stats
+                document.getElementById('stat-running-count').textContent = data.count || 0;
+                document.getElementById('stat-systemd-count').textContent = (data.services || []).length;
+                
+                const activePorts = (data.servers || []).map(s => s.port).join(', ');
+                document.getElementById('stat-active-ports').textContent = activePorts || 'None';
+
+                // Render Systemd Services
+                renderSystemdServices(data.services || []);
+
+                // Render Active Processes
+                renderProcesses(data.servers || []);
+
+                // Update status timestamp
+                showStatus('<i class="fa-solid fa-check"></i> Updated at ' + (data.timestamp || new Date().toLocaleTimeString()), 'var(--color-green)');
+            } catch (e) {
+                showStatus('<i class="fa-solid fa-triangle-exclamation"></i> Failed to connect to server backend: ' + e, 'var(--color-pink)');
+            }
+        }
+
+        function renderSystemdServices(services) {
+            const tbody = document.getElementById('systemd-list');
+            if (services.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No systemd iperf3 units detected.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = services.map(s => {
+                const isActive = s.active_state === 'active';
+                const badgeClass = isActive ? 'badge-active' : 'badge-inactive';
+                const statusText = isActive ? '<i class="fa-solid fa-circle-play"></i> Active' : '<i class="fa-solid fa-circle-stop"></i> Inactive';
+
+                return `
+                    <tr>
+                        <td><strong>${s.unit}</strong></td>
+                        <td><span style="color: var(--color-blue); font-weight: 700;">:${s.port}</span></td>
+                        <td><span class="badge ${badgeClass}">${statusText}</span></td>
+                        <td>
+                            <div class="row-group">
+                                ${isActive ? `
+                                    <button class="btn btn-red btn-sm" onclick="stopUnit('${s.unit}')"><i class="fa-solid fa-stop"></i> Stop</button>
+                                    <button class="btn btn-blue btn-sm" onclick="restartUnit('${s.unit}')"><i class="fa-solid fa-rotate-right"></i> Restart</button>
+                                ` : `
+                                    <button class="btn btn-green btn-sm" onclick="startUnit('${s.unit}')"><i class="fa-solid fa-play"></i> Start</button>
+                                `}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderProcesses(processes) {
+            const tbody = document.getElementById('processes-list');
+            if (processes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No iperf3 server processes currently running.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = processes.map(p => {
+                return `
+                    <tr>
+                        <td><span style="color: var(--color-blue); font-weight: 700; font-size: 1rem;">:${p.port}</span></td>
+                        <td><code>${p.pid}</code></td>
+                        <td>${p.user}</td>
+                        <td>${p.elapsed}</td>
+                        <td><div class="cmd-text" title="${p.command}">${p.command}</div></td>
+                        <td>
+                            <button class="btn btn-red btn-sm" onclick="stopPid(${p.pid})"><i class="fa-solid fa-power-off"></i> Terminate</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function fetchPortMatrix() {
+            try {
+                const res = await fetch('api/ports/check?start_port=5201&end_port=5210');
+                const data = await res.json();
+                if (!data.success || !data.ports) return;
+
+                const div = document.getElementById('port-matrix');
+                div.innerHTML = data.ports.map(p => {
+                    let bg, color, text;
+                    if (p.status === 'active') {
+                        bg = 'rgba(0, 230, 118, 0.12)';
+                        color = 'var(--color-green)';
+                        text = `Port ${p.port}: Active (PID ${p.pid})`;
+                    } else if (p.status === 'occupied_other') {
+                        bg = 'rgba(255, 145, 0, 0.12)';
+                        color = 'var(--color-orange)';
+                        text = `Port ${p.port}: Occupied (Other)`;
+                    } else {
+                        bg = 'rgba(0, 210, 255, 0.08)';
+                        color = 'var(--color-blue)';
+                        text = `Port ${p.port}: Free (Click to launch)`;
+                    }
+
+                    return `
+                        <div style="background: ${bg}; border: 1px solid ${color}; color: ${color}; padding: 0.5rem 0.85rem; border-radius: 10px; cursor: pointer;" onclick="setPort(${p.port})">
+                            <i class="fa-solid fa-network-wired"></i> <strong>:${p.port}</strong> &mdash; ${p.status.toUpperCase()}
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function startServer() {
+            const port = parseInt(document.getElementById('server-port').value);
+            const interval = parseInt(document.getElementById('server-interval').value) || 0;
+            const bindAddr = document.getElementById('server-bind').value.trim();
+            const oneOff = document.getElementById('server-oneoff').checked;
+
+            if (!port || port < 1 || port > 65535) {
+                showStatus('Invalid port number.', 'var(--color-pink)');
+                return;
+            }
+
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Starting server on port ' + port + '...', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('api/servers/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        port: port,
+                        interval: interval,
+                        bind_address: bindAddr,
+                        one_off: oneOff
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showStatus('<i class="fa-solid fa-check"></i> ' + data.message, 'var(--color-green)');
+                    refreshAll();
+                } else {
+                    showStatus('<i class="fa-solid fa-triangle-exclamation"></i> ' + data.error, 'var(--color-pink)');
+                }
+            } catch (e) {
+                showStatus('Failed to start server: ' + e, 'var(--color-pink)');
+            }
+        }
+
+        async function startUnit(unit) {
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Starting systemd unit ' + unit + '...', 'var(--color-blue)');
+            await controlUnit('start', unit);
+        }
+
+        async function stopUnit(unit) {
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Stopping systemd unit ' + unit + '...', 'var(--color-blue)');
+            await controlUnit('stop', unit);
+        }
+
+        async function restartUnit(unit) {
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Restarting systemd unit ' + unit + '...', 'var(--color-blue)');
+            await controlUnit('restart', unit);
+        }
+
+        async function controlUnit(action, unit) {
+            try {
+                const endpoint = action === 'restart' ? 'api/servers/restart' : (action === 'start' ? 'api/servers/start' : 'api/servers/stop');
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit: unit })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showStatus('<i class="fa-solid fa-check"></i> ' + data.message, 'var(--color-green)');
+                } else {
+                    showStatus('<i class="fa-solid fa-triangle-exclamation"></i> ' + data.error, 'var(--color-pink)');
+                }
+                refreshAll();
+            } catch (e) {
+                showStatus('Action failed: ' + e, 'var(--color-pink)');
+            }
+        }
+
+        async function stopPid(pid) {
+            if (!confirm('Are you sure you want to terminate process PID ' + pid + '?')) return;
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Terminating process ' + pid + '...', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('api/servers/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pid: pid })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showStatus('<i class="fa-solid fa-check"></i> ' + data.message, 'var(--color-green)');
+                    refreshAll();
+                } else {
+                    showStatus('<i class="fa-solid fa-triangle-exclamation"></i> ' + data.error, 'var(--color-pink)');
+                }
+            } catch (e) {
+                showStatus('Failed to terminate process: ' + e, 'var(--color-pink)');
+            }
+        }
+
+        function refreshAll() {
+            fetchServers();
+            fetchPortMatrix();
+        }
+
+        function updateAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+            const intervalSec = parseInt(document.getElementById('auto-refresh-interval').value);
+            if (intervalSec > 0) {
+                autoRefreshTimer = setInterval(refreshAll, intervalSec * 1000);
+            }
+        }
+
+        // Initial Load
+        refreshAll();
+        updateAutoRefresh();
+    </script>
+</body>
+</html>

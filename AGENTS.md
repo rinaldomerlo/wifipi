@@ -6,12 +6,17 @@ This document summarizes the architecture, key components, design standards, and
 
 ## 1. Project Overview
 
-**WiFiPi** is a collection of wireless testing and monitoring tools designed to run natively on a Raspberry Pi. The repository contains two standalone Flask web applications with a unified modern UI and production deployment configurations.
+**WiFiPi** is a collection of wireless testing and monitoring tools designed to run natively on a Raspberry Pi. The repository contains standalone Flask web applications with a unified modern UI and production deployment configurations.
+
+### Environment & Development Context
+- **Target / Deployment Environment**: Raspberry Pi running Linux (Raspberry Pi OS / Debian). This environment provides native access to hardware wireless interfaces (`iw`), `systemd` process management, and networking utilities (`iperf3`, `nginx`).
+- **Development / IDE Environment**: Typically macOS (or PC workstation). Code editing, static analysis, unit testing, and IDE workflows frequently take place on Mac or PC developer workstations. Development logic and unit tests should account for platform differences (e.g., non-Linux OS lacking `systemctl` or Linux `/proc`) gracefully using mocks or conditional fallbacks to optimize developer efficiency and maintain utility across environments.
 
 Project Root Structure:
 - `www/` — Default static landing webpage (`index.html`).
 - `wifi_utilization_monitor/` — Real-time WiFi channel utilization and spectrum analyzer.
 - `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams.
+- `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -36,6 +41,10 @@ Project Root Structure:
 - **Purpose**: Provides a web interface to start, monitor, and stop `iperf3` client test streams across network interfaces.
 - **Real-time Streaming**: Uses Server-Sent Events (SSE) to stream live stdout/stderr from `iperf3` processes to the browser UI.
 
+### C. iPerf3 Server Manager (`iperf_server_manager`)
+- **Purpose**: Provides a web interface to discover, launch, stop, restart, and monitor running `iperf3` server daemons and systemd service units (e.g. `iperf3-5202.service`).
+- **Management Capabilities**: Discovers active processes via `ps`, parses port numbers, manages systemd services via `systemctl`, and verifies port availability matrix.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -54,13 +63,16 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
 1. **WSGI Server**: **Gunicorn** (`gunicorn>=20.1.0`)
    - WiFi Monitor worker: bound to `0.0.0.0:5000` (2 workers).
    - iPerf Generator worker: bound to `0.0.0.0:5001` (1 worker, multi-threaded for SSE streaming).
+   - iPerf Server Manager worker: bound to `0.0.0.0:5002` (2 workers).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
+   - `iperf-server-manager.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
    - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
+   - Port `80` (Subpath `/iperfserver/`): Proxies to iPerf Server Manager (`127.0.0.1:5002`).
 
 ---
 

@@ -1,0 +1,14 @@
+[Unit]
+Description=iperf3 server on port 5202
+After=network.target auditd.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=15
+User=iperf3
+ExecStart=/usr/bin/iperf3 --server --port 5202 --interval 0
+SuccessExitStatus=1
+
+[Install]
+WantedBy=multi-user.target

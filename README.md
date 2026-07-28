@@ -10,7 +10,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A Flask web application that visualizes real-time WiFi channel utilization, spectrum coverage across 2.4 GHz, 5 GHz, and 6 GHz bands, and live BSS scanning.
 2. **iPerf3 Congestion Generator (`iperf_congestion_generator`)**  
    A browser-based UI to configure, monitor, and control long-running `iperf3` client test streams across network interfaces.
-3. **Default Landing Webpage (`www`)**  
+3. **iPerf3 Server Manager (`iperf_server_manager`)**  
+   A web interface to discover, launch, stop, restart, and monitor running `iperf3` server daemons and systemd services across ports.
+4. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -69,23 +71,40 @@ Systemd service files are provided in the `deploy/` directory. Copy them to `/et
 ```bash
 sudo cp deploy/wifi-monitor.service /etc/systemd/system/
 sudo cp deploy/iperf-generator.service /etc/systemd/system/
+sudo cp deploy/iperf-server-manager.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-*Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit `/etc/systemd/system/wifi-monitor.service` and `iperf-generator.service` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
+*Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit the service files in `/etc/systemd/system/` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
 
-Enable and start both services:
+Enable and start services:
 
 ```bash
 sudo systemctl enable --now wifi-monitor
 sudo systemctl enable --now iperf-generator
+sudo systemctl enable --now iperf-server-manager
 ```
 
 Verify service status:
 ```bash
 sudo systemctl status wifi-monitor
 sudo systemctl status iperf-generator
+sudo systemctl status iperf-server-manager
 ```
+
+#### Multi-Port iPerf3 Server Services (Optional)
+
+In addition to the web application services, example systemd service files are provided in `deploy/` for persistent multi-port `iperf3` server daemons (ports 5202, 5203, 5204):
+
+```bash
+sudo cp deploy/iperf3-5202.service /etc/systemd/system/
+sudo cp deploy/iperf3-5203.service /etc/systemd/system/
+sudo cp deploy/iperf3-5204.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now iperf3-5202 iperf3-5203 iperf3-5204
+```
+
+These multi-port iPerf3 server daemons will automatically be discovered and can be managed directly through the **iPerf3 Server Manager** UI (`/iperfserver/`).
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
@@ -120,3 +139,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **Default Webpage (Root `/`)**: Open `http://<pi-ip>/` (Static landing page in `/opt/wifipi/www` with links to all tools)
 - **WiFi Channel & Utilization Monitor**: Open `http://<pi-ip>/wifimon/` (Subpath `/wifimon/` reverse-proxied to Gunicorn on port 5000)
 - **iPerf3 Congestion Generator**: Open `http://<pi-ip>/iperf/` (Subpath `/iperf/` reverse-proxied to Gunicorn on port 5001)
+- **iPerf3 Server Manager**: Open `http://<pi-ip>/iperfserver/` (Subpath `/iperfserver/` reverse-proxied to Gunicorn on port 5002)
