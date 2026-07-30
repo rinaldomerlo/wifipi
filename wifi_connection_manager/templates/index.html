@@ -350,6 +350,7 @@
 
     let pendingConnectSsid = null;
     let scanning = false;
+    let savedNetworkNames = new Set();
 
     function showToast(message, isError) {
         const toast = document.getElementById('toast');
@@ -461,6 +462,8 @@
     }
 
     function renderSaved(data) {
+        savedNetworkNames = new Set(data.success ? data.saved.map(s => s.name) : []);
+
         if (!data.success) {
             savedBody.innerHTML = `<tr class="empty-row"><td colspan="3">${escapeHtml(data.error || 'Failed to load saved networks')}</td></tr>`;
             return;
@@ -609,7 +612,8 @@
         if (connectBtn) {
             const ssid = connectBtn.getAttribute('data-connect-ssid');
             const security = connectBtn.getAttribute('data-connect-security');
-            if (security === 'Open') {
+            if (security === 'Open' || savedNetworkNames.has(ssid)) {
+                // Open, or already saved — NetworkManager has (or needs no) credentials.
                 connect(ssid, '');
             } else {
                 openConnectModal(ssid, security);
