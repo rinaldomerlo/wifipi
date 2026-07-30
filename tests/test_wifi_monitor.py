@@ -37,6 +37,12 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_api_hostname_route(self):
+        # Consumed by the static landing page, which has no backend of its own
+        response = self.client.get('/api/hostname')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['hostname'], socket.gethostname())
+
     def test_api_interfaces_route(self):
         response = self.client.get('/api/interfaces')
         self.assertEqual(response.status_code, 200)

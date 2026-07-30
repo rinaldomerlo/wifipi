@@ -125,6 +125,11 @@ def resolve_vendor(bssid):
 def index():
     return render_template('index.html', hostname=get_hostname())
 
+@app.route('/api/hostname')
+def api_hostname():
+    """Expose the host name so the static landing page can display it too."""
+    return jsonify({'hostname': get_hostname()})
+
 @app.route('/api/interfaces')
 def api_interfaces():
     return jsonify({

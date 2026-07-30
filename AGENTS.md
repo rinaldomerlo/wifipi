@@ -62,9 +62,12 @@ Both applications share a unified design system:
   tab can always be traced back to a specific Raspberry Pi.
   - Flask apps expose `get_hostname()` (a guarded `socket.gethostname()`) in `app.py`, pass it to
     `render_template(..., hostname=...)`, and render it in the `.app-header` as a `.host-badge` pill.
-  - `www/index.html` is static with no backend, so it populates `#hostName` from
-    `window.location.hostname` via a small inline script.
-  - Each app's test module asserts the badge and hostname appear in the rendered index page.
+    They also serve `GET /api/hostname` so the static landing page can obtain the same value.
+  - `www/index.html` is static with no backend and therefore resolves the host in three steps:
+    Nginx SSI (`<!--# echo var="hostname" -->`, requires `ssi on;`), then a `fetch` of an app's
+    `/api/hostname`, then `window.location.hostname` as a last resort. Only the first two yield the
+    machine's true host name — the third reports whatever address was typed, usually an IP.
+  - Each app's test module asserts the badge, the host name, and the `/api/hostname` endpoint.
   - Any newly added screen inherits this requirement.
 
 ---

@@ -37,6 +37,12 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_api_hostname_route(self):
+        # Consumed by the static landing page, which has no backend of its own
+        response = self.client.get('/api/hostname')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['hostname'], socket.gethostname())
+
     def test_start_route_invalid_ip(self):
         response = self.client.post('/start', json={"server_ip": "invalid-ip"})
         self.assertEqual(response.status_code, 400)

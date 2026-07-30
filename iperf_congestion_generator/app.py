@@ -189,6 +189,12 @@ def index():
     return render_template("index.html", hostname=get_hostname())
 
 
+@app.route("/api/hostname", methods=["GET"])
+def api_hostname():
+    """Expose the host name so the static landing page can display it too."""
+    return jsonify({"hostname": get_hostname()})
+
+
 @app.route("/scan", methods=["POST"])
 def scan():
     try:

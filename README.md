@@ -132,6 +132,12 @@ The default static landing webpage is located in `/opt/wifipi/www/index.html`. N
    sudo systemctl restart nginx
    ```
 
+> **Note on the host name display**: every page shows the host it is served from. The three Flask apps
+> report it directly. The static landing page has no backend, so it relies on the `ssi on;` directive in
+> the root `location` block of `nginx.conf.example` to print the Pi's real host name. If you are
+> upgrading from an older configuration, re-copy the template (step 1) so the landing page shows the
+> host name rather than falling back to the IP address you typed in the URL bar.
+
 ### Accessing Your Applications
 
 All applications are served over standard HTTP (Port 80) via path routing:

@@ -15,6 +15,11 @@ server {
         root /opt/wifipi/www;
         index index.html;
         try_files $uri $uri/ =404;
+
+        # Server Side Includes let index.html print this machine's real host name
+        # via <!--# echo var="hostname" -->. Without it the landing page falls back
+        # to querying an app, then to the address in the URL bar (often just an IP).
+        ssi on;
     }
 
     # Automatic redirect to trailing-slash URLs for subpath apps

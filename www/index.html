@@ -164,7 +164,7 @@
             <h1>WiFi<span>Pi</span> Testing Tools</h1>
             <p class="subtitle">Wireless spectrum analysis & network performance tools</p>
             <span class="host-badge" title="Host serving this page">
-                Host: <strong id="hostName">&mdash;</strong>
+                Host: <strong id="hostName"><!--# echo var="hostname" default="" --></strong>
             </span>
         </header>
 
@@ -215,12 +215,39 @@
     </div>
 
     <script>
-        // Static page — no backend, so derive the host from the address used to reach it.
+        // This page is static, so the host name is resolved in escalating steps:
+        //   1. Nginx SSI substitutes the real host name above (requires `ssi on;`).
+        //   2. Otherwise ask a proxied Flask app, which reports socket.gethostname().
+        //   3. Otherwise settle for the address this page was reached on (often an IP).
         (function () {
             var el = document.getElementById('hostName');
-            if (el) {
-                el.textContent = window.location.hostname || 'localhost';
-            }
+            if (!el) return;
+
+            // Step 1 already succeeded — nothing to do.
+            if (el.textContent.trim()) return;
+
+            // Step 3 up front, so the badge is never blank while step 2 is in flight.
+            el.textContent = window.location.hostname || 'localhost';
+
+            var endpoints = [
+                '/wifimon/api/hostname',
+                '/iperfserver/api/hostname',
+                '/iperf/api/hostname'
+            ];
+
+            (function tryNext(i) {
+                if (i >= endpoints.length) return;
+                fetch(endpoints[i], { cache: 'no-store' })
+                    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                    .then(function (data) {
+                        if (data && data.hostname) {
+                            el.textContent = data.hostname;
+                        } else {
+                            tryNext(i + 1);
+                        }
+                    })
+                    .catch(function () { tryNext(i + 1); });
+            })(0);
         })();
     </script>
 
