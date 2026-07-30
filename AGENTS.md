@@ -9,7 +9,7 @@ This document summarizes the architecture, key components, design standards, and
 **WiFiPi** is a collection of wireless testing and monitoring tools designed to run natively on a Raspberry Pi. The repository contains standalone Flask web applications with a unified modern UI and production deployment configurations.
 
 ### Environment & Development Context
-- **Target / Deployment Environment**: Raspberry Pi running Linux (Raspberry Pi OS / Debian). This environment provides native access to hardware wireless interfaces (`iw`), `systemd` process management, and networking utilities (`iperf3`, `nginx`).
+- **Target / Deployment Environment**: Raspberry Pi running Linux (Raspberry Pi OS / Debian). This environment provides native access to hardware wireless interfaces (`iw`), `systemd` process management, NetworkManager (`nmcli`), and networking utilities (`iperf3`, `nginx`).
 - **Development / IDE Environment**: Typically macOS (or PC workstation). Code editing, static analysis, unit testing, and IDE workflows frequently take place on Mac or PC developer workstations. Development logic and unit tests should account for platform differences (e.g., non-Linux OS lacking `systemctl` or Linux `/proc`) gracefully using mocks or conditional fallbacks to optimize developer efficiency and maintain utility across environments.
 
 Project Root Structure:
@@ -17,6 +17,7 @@ Project Root Structure:
 - `wifi_utilization_monitor/` — Real-time WiFi channel utilization and spectrum analyzer.
 - `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams.
 - `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
+- `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -50,6 +51,26 @@ Project Root Structure:
     <username> ALL=(ALL) NOPASSWD: /usr/bin/systemctl start iperf3*, /usr/bin/systemctl stop iperf3*, /usr/bin/systemctl restart iperf3*, /usr/bin/systemctl is-active iperf3*
     ```
 
+### D. WiFi Connection Manager (`wifi_connection_manager`)
+- **Purpose**: Provides a web interface to scan for nearby WiFi networks, connect/disconnect the wireless
+  interface, and manage (and forget) saved network profiles.
+- **Backend**: A thin wrapper around NetworkManager's `nmcli` CLI, entirely — no `wpa_supplicant` or
+  `dhcpcd` interaction. All output is parsed from `nmcli -t` (terse, colon-delimited) fields; colons
+  embedded in SSIDs are backslash-escaped by `nmcli` and unescaped by `_split_terse()` in `app.py`.
+  - `GET /api/status` — current connection details for the detected WiFi device.
+  - `GET /api/scan` — `nmcli device wifi list --rescan yes`, de-duplicated by SSID (keeps the strongest BSSID).
+  - `GET /api/saved` / `POST /api/forget` — saved connection profiles (`nmcli connection show`/`delete`).
+  - `POST /api/connect` / `POST /api/disconnect` — `nmcli device wifi connect` / `nmcli device disconnect`.
+    nmcli's stderr is mapped to a friendlier message (e.g. "Secrets were required..." → "Incorrect password.")
+    by `friendly_connect_error()`.
+- **System Privilege Requirement**: Requires NetworkManager (`nmcli`) to be the active network backend —
+  it will not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
+  Executes all state-changing calls via `sudo nmcli ...`.
+  - *Sudoers Rule*: Requires passwordless sudo configuration for the local app user:
+    ```text
+    <username> ALL=(ALL) NOPASSWD: /usr/bin/nmcli
+    ```
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -80,15 +101,18 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - WiFi Monitor worker: bound to `0.0.0.0:5000` (2 workers).
    - iPerf Generator worker: bound to `0.0.0.0:5001` (1 worker, multi-threaded for SSE streaming).
    - iPerf Server Manager worker: bound to `0.0.0.0:5002` (2 workers).
+   - WiFi Connection Manager worker: bound to `0.0.0.0:5003` (2 workers).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
    - `iperf-server-manager.service`
+   - `wifi-connection-manager.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
    - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
    - Port `80` (Subpath `/iperfserver/`): Proxies to iPerf Server Manager (`127.0.0.1:5002`).
+   - Port `80` (Subpath `/wificonnect/`): Proxies to WiFi Connection Manager (`127.0.0.1:5003`).
 
 ---
 

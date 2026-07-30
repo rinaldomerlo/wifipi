@@ -14,6 +14,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `wifi_utilization_monitor/` | Flask app — live WiFi channel/spectrum monitor (2.4/5/6 GHz). Port 5000, proxied at `/wifimon/`. |
 | `iperf_congestion_generator/` | Flask app — starts/stops `iperf3` client streams, streams output over SSE. Port 5001, proxied at `/iperf/`. |
 | `iperf_server_manager/` | Flask app — discovers and controls `iperf3` server daemons and systemd units. Port 5002, proxied at `/iperfserver/`. |
+| `wifi_connection_manager/` | Flask app — scans/connects/disconnects WiFi via `nmcli` (NetworkManager). Port 5003, proxied at `/wificonnect/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -33,6 +34,7 @@ Only `wifi_utilization_monitor` has separate `static/` assets and a `parser.py`.
 cd wifi_utilization_monitor && ../.venv/bin/python app.py        # :5000
 cd iperf_congestion_generator && ../.venv/bin/python app.py      # :5001
 cd iperf_server_manager && ../.venv/bin/python app.py            # :5002
+cd wifi_connection_manager && ../.venv/bin/python app.py         # :5003
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -42,21 +44,23 @@ Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv live
 
 ## Environment Split — Important
 
-- **Deployment target**: Raspberry Pi OS / Debian. Real `iw`, `systemctl`, `iperf3`, `nmap`, `/proc/net/wireless`.
+- **Deployment target**: Raspberry Pi OS / Debian. Real `iw`, `systemctl`, `nmcli`, `iperf3`, `nmap`, `/proc/net/wireless`.
 - **Development machine**: usually macOS, where none of those behave the same way.
 
 Code that shells out to system tools must degrade gracefully off-Linux rather than crashing — wrap in
 `try/except`, check `shutil.which(...)`, or fall back. Tests must pass on macOS with no privileged
 tooling present; mock the subprocess boundary instead of requiring the real binary.
 
-Two apps need passwordless sudo in production (rules documented in `README.md` and `AGENTS.md`):
-`iw` for the WiFi monitor, and `systemctl ... iperf3*` for the server manager.
+Three apps need passwordless sudo in production (rules documented in `README.md` and `AGENTS.md`):
+`iw` for the WiFi monitor, `systemctl ... iperf3*` for the server manager, and `nmcli` for the connection
+manager. The connection manager also requires NetworkManager to be the active network backend — it does
+not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
 
 ---
 
 ## UI Requirements
 
-All four GUI screens share one design system. When adding UI, match the existing patterns rather than
+All GUI screens share one design system. When adding UI, match the existing patterns rather than
 introducing new ones:
 
 - Glassmorphism over a dark gradient: `--glass-bg`, `--glass-border`, translucent cards, `backdrop-filter: blur(12px)`.
@@ -87,6 +91,6 @@ Any new screen added to this project inherits both the design system and the hos
 - Keep each app's HTML/CSS/JS inline in its template, matching the file it lives in — this project
   deliberately avoids a build step or shared asset pipeline.
 - Add tests to the matching `tests/test_*.py` module. Note the import guard at the top of those files
-  (`del sys.modules['app']`) that prevents collisions between the three same-named `app` modules —
+  (`del sys.modules['app']`) that prevents collisions between the four same-named `app` modules —
   preserve it.
 - Do not commit or push unless asked.

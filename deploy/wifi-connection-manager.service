@@ -1,0 +1,15 @@
+[Unit]
+Description=WiFi Connection Manager (Flask / Gunicorn)
+After=network.target
+
+[Service]
+# Uncomment and set User/Group if you wish to run as a specific non-root user (e.g., User=jenkins or User=pi).
+# If omitted, systemd runs the service as root.
+# User=pi
+# Group=pi
+WorkingDirectory=/opt/wifipi/wifi_connection_manager
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 0.0.0.0:5003 --workers 2 --timeout 60 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

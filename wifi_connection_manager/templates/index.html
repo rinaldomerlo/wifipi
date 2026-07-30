@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /wificonnect to /wificonnect/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Connection Manager - WiFiPi</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .glass-bg {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+
+        .app-header {
+            display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 2rem;
+            background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--shadow-md);
+            flex-wrap: wrap; gap: 1rem;
+        }
+
+        .logo { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+        .logo-icon {
+            font-size: 2.2rem; background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+        .logo-text h1 { font-family: var(--font-heading); font-size: 1.6rem; font-weight: 800; letter-spacing: 1px; line-height: 1.1; }
+        .logo-text h1 span { color: var(--color-blue); font-weight: 400; }
+        .logo-text .subtitle { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1.5px; }
+
+        .host-badge {
+            display: inline-flex; align-items: center; gap: 0.45rem; font-family: var(--font-heading); font-size: 0.78rem;
+            color: var(--text-secondary); background: rgba(8, 9, 15, 0.4); border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem; border-radius: 50px; white-space: nowrap;
+        }
+        .host-badge i { color: var(--color-blue); }
+        .host-badge strong { color: var(--text-primary); font-weight: 600; }
+
+        .nav-links { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+        .nav-btn {
+            display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.1rem; border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); color: var(--text-primary);
+            text-decoration: none; font-size: 0.85rem; font-weight: 600; transition: all 0.25s ease;
+        }
+        .nav-btn:hover { background: rgba(0, 210, 255, 0.15); border-color: var(--color-blue); color: #fff; transform: translateY(-2px); }
+
+        .glass-card {
+            background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--shadow-md); padding: 1.5rem;
+        }
+        .card-header-title {
+            display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem; border-bottom: 1px solid var(--glass-border); flex-wrap: wrap; gap: 0.75rem;
+        }
+        .card-header-title h2 { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.6rem; }
+        .card-header-title h2 i { color: var(--color-blue); }
+
+        /* Connection hero */
+        .conn-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; }
+        .conn-hero-left { display: flex; align-items: center; gap: 1.25rem; }
+        .conn-icon-ring {
+            width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            background: rgba(0, 230, 118, 0.1); border: 2px solid rgba(0, 230, 118, 0.35); position: relative; flex-shrink: 0;
+            transition: all 0.3s ease;
+        }
+        .conn-icon-ring.disconnected { background: rgba(255, 59, 116, 0.08); border-color: rgba(255, 59, 116, 0.3); }
+        .conn-icon-ring i { font-size: 1.6rem; color: var(--color-green); }
+        .conn-icon-ring.disconnected i { color: var(--color-pink); }
+        .conn-icon-ring:not(.disconnected)::after {
+            content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid rgba(0, 230, 118, 0.25);
+            animation: pulse-ring 2.4s ease-out infinite;
+        }
+        @keyframes pulse-ring { 0% { transform: scale(0.9); opacity: 0.8; } 100% { transform: scale(1.35); opacity: 0; } }
+        .conn-ssid { font-family: var(--font-heading); font-size: 1.4rem; font-weight: 700; }
+        .conn-meta { display: flex; gap: 1.25rem; margin-top: 0.35rem; color: var(--text-secondary); font-size: 0.85rem; flex-wrap: wrap; }
+        .conn-meta span { display: inline-flex; align-items: center; gap: 0.4rem; }
+        .conn-meta i { color: var(--color-blue); width: 14px; }
+
+        .stats-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0 0; }
+        .stat-box { background: rgba(8, 9, 15, 0.5); border: 1px solid var(--glass-border); border-radius: 14px; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
+        .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+        .stat-value { font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700; color: var(--color-blue); }
+
+        .btn {
+            border: none; outline: none; font-family: var(--font-main); font-weight: 600; font-size: 0.88rem; padding: 0.65rem 1.2rem;
+            border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; transition: all 0.25s ease;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+        .btn-green { background: linear-gradient(135deg, #00e676 0%, #00c853 100%); color: #08090f; box-shadow: 0 4px 12px rgba(0, 230, 118, 0.2); }
+        .btn-green:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 230, 118, 0.35); }
+        .btn-red { background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%); color: #fff; box-shadow: 0 4px 12px rgba(255, 59, 116, 0.2); }
+        .btn-red:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(255, 59, 116, 0.35); }
+        .btn-blue { background: linear-gradient(135deg, var(--color-blue) 0%, #0091ea 100%); color: #08090f; box-shadow: 0 4px 12px rgba(0, 210, 255, 0.2); }
+        .btn-blue:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 210, 255, 0.35); }
+        .btn-sm { padding: 0.4rem 0.9rem; font-size: 0.8rem; border-radius: 8px; }
+        .btn-ghost { background: rgba(255,255,255,0.05); color: var(--text-primary); border: 1px solid var(--glass-border); }
+        .btn-ghost:hover:not(:disabled) { border-color: var(--glass-border-hover); transform: translateY(-2px); }
+
+        .table-responsive { width: 100%; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.88rem; text-align: left; }
+        th {
+            padding: 0.75rem 1rem; background: rgba(8, 9, 15, 0.6); color: var(--text-secondary); font-size: 0.75rem;
+            text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--glass-border);
+        }
+        td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--glass-border); vertical-align: middle; }
+        tr:hover td { background: rgba(255, 255, 255, 0.02); }
+        tr.row-connected td { background: rgba(0, 230, 118, 0.05); }
+        .empty-row td { text-align: center; padding: 2.5rem; color: var(--text-secondary); font-style: italic; }
+
+        .badge { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem; }
+        .badge-signal { background: rgba(0, 230, 118, 0.1); color: var(--color-green); border: 1px solid rgba(0, 230, 118, 0.2); }
+        .badge-signal.mid { background: rgba(255, 145, 0, 0.1); color: var(--color-orange); border: 1px solid rgba(255, 145, 0, 0.2); }
+        .badge-signal.weak { background: rgba(255, 59, 116, 0.1); color: var(--color-pink); border: 1px solid rgba(255, 59, 116, 0.2); }
+        .badge-sec { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); border: 1px solid var(--glass-border); }
+        .badge-sec.open { background: rgba(255, 59, 116, 0.15); color: var(--color-pink); border: 1px solid rgba(255, 59, 116, 0.2); }
+        .badge-connected { background: rgba(0, 230, 118, 0.15); color: var(--color-green); border: 1px solid rgba(0, 230, 118, 0.3); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+        .signal-bars i { width: 3px; border-radius: 1px; background: var(--text-muted); display: block; }
+        .signal-bars i:nth-child(1) { height: 30%; } .signal-bars i:nth-child(2) { height: 55%; }
+        .signal-bars i:nth-child(3) { height: 75%; } .signal-bars i:nth-child(4) { height: 100%; }
+        .signal-bars.strength-4 i { background: var(--color-green); }
+        .signal-bars.strength-3 i:nth-child(-n+3) { background: var(--color-green); }
+        .signal-bars.strength-2 i:nth-child(-n+2) { background: var(--color-orange); }
+        .signal-bars.strength-1 i:nth-child(1) { background: var(--color-pink); }
+
+        .ssid-cell { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; }
+        .ssid-cell i.fa-lock { color: var(--text-muted); font-size: 0.75rem; }
+
+        .refresh-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem; }
+        .scan-status { font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; }
+        .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-blue); box-shadow: 0 0 8px var(--color-blue); display: inline-block; }
+        .pulse-dot.scanning { animation: pulse 1.2s infinite ease-in-out; }
+        .pulse-dot.idle { background: var(--text-muted); box-shadow: none; }
+        @keyframes pulse { 0%,100% { opacity: 0.5; transform: scale(0.9);} 50% { opacity: 1; transform: scale(1.15);} }
+
+        /* Toast */
+        #toast {
+            position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 200; max-width: 360px;
+            padding: 0.9rem 1.25rem; border-radius: 14px; font-size: 0.88rem; font-weight: 500;
+            box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 0.65rem;
+            transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.3s ease;
+            background: var(--bg-light); border: 1px solid var(--glass-border-hover);
+        }
+        #toast.show { transform: translateY(0); opacity: 1; }
+        #toast.success { border-color: rgba(0, 230, 118, 0.4); }
+        #toast.success i { color: var(--color-green); }
+        #toast.error { border-color: rgba(255, 59, 116, 0.4); }
+        #toast.error i { color: var(--color-pink); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(4,5,10,0.65); backdrop-filter: blur(4px);
+            display: flex; align-items: center; justify-content: center; z-index: 150;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .modal {
+            width: 380px; max-width: 92vw; background: var(--bg-light); border: 1px solid var(--glass-border-hover);
+            border-radius: 20px; box-shadow: var(--shadow-lg); padding: 1.75rem;
+        }
+        .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
+        .modal-header h3 { font-family: var(--font-heading); font-size: 1.1rem; display: flex; align-items: center; gap: 0.6rem; word-break: break-word; }
+        .modal-header h3 i { color: var(--color-blue); flex-shrink: 0; }
+        .modal-close { background: none; border: none; color: var(--text-secondary); font-size: 1.1rem; cursor: pointer; flex-shrink: 0; }
+        .modal label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.4rem; }
+        .modal input {
+            width: 100%; padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6); color: var(--text-primary); font-family: var(--font-main); font-size: 0.9rem; outline: none; margin-bottom: 1rem;
+        }
+        .modal input:focus { border-color: var(--color-blue); box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15); }
+        .modal-hint { font-size: 0.78rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.4rem; margin-bottom: 1.25rem; }
+        .modal-error { font-size: 0.82rem; color: var(--color-pink); margin: -0.5rem 0 1rem; display: none; }
+        .modal-error.show { display: block; }
+        .modal-actions { display: flex; gap: 0.75rem; }
+        .modal-actions button { flex: 1; margin: 0; }
+
+        @media (max-width: 768px) {
+            .app-header { flex-direction: column; align-items: stretch; }
+            .logo { justify-content: center; }
+            .conn-hero { flex-direction: column; align-items: stretch; }
+            .conn-hero > button { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-wifi logo-icon"></i>
+                <div class="logo-text">
+                    <h1>WIFI<span>CONNECT</span></h1>
+                    <span class="subtitle">Network Connection Manager</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <!-- Connection status hero -->
+        <div class="glass-card">
+            <div class="conn-hero">
+                <div class="conn-hero-left">
+                    <div class="conn-icon-ring disconnected" id="connIconRing"><i class="fa-solid fa-wifi"></i></div>
+                    <div>
+                        <div class="conn-ssid" id="connSsid">Loading&hellip;</div>
+                        <div class="conn-meta" id="connMeta"></div>
+                    </div>
+                </div>
+                <button class="btn btn-red" id="disconnectBtn" style="display:none;">
+                    <i class="fa-solid fa-plug-circle-xmark"></i> Disconnect
+                </button>
+            </div>
+            <div class="stats-summary" id="connStats" style="display:none;"></div>
+        </div>
+
+        <!-- Available networks -->
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-magnifying-glass"></i> Available Networks</h2>
+                <button class="btn btn-blue btn-sm" id="rescanBtn"><i class="fa-solid fa-arrows-rotate"></i> Rescan</button>
+            </div>
+            <div class="refresh-row">
+                <div class="scan-status">
+                    <span class="pulse-dot idle" id="scanPulse"></span>
+                    <span id="scanStatusText">Scanning for networks&hellip;</span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr><th>Network</th><th>Signal</th><th>Security</th><th>Band</th><th>Channel</th><th style="text-align:right;">Action</th></tr>
+                    </thead>
+                    <tbody id="networksBody">
+                        <tr class="empty-row"><td colspan="6">Scanning&hellip;</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Saved networks -->
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-star"></i> Saved Networks</h2>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Network</th><th>Auto-Connect</th><th style="text-align:right;">Actions</th></tr></thead>
+                    <tbody id="savedBody">
+                        <tr class="empty-row"><td colspan="3">Loading&hellip;</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connect modal — only shown for secured networks -->
+    <div class="modal-overlay" id="connectModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-lock"></i> <span id="modalSsid">Connect</span></h3>
+                <button class="modal-close" id="modalClose"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <label for="pw">Network Password</label>
+            <input type="password" id="pw" placeholder="Enter passphrase" autocomplete="off">
+            <div class="modal-error" id="modalError"></div>
+            <div class="modal-hint" id="modalHint"><i class="fa-solid fa-circle-info" style="color: var(--color-blue);"></i> <span></span></div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" id="modalCancel">Cancel</button>
+                <button class="btn btn-blue" id="modalConnect"><i class="fa-solid fa-plug"></i> Connect</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"><i class="fa-solid fa-circle-check"></i><span id="toastText"></span></div>
+
+<script>
+(function () {
+    const scanPulse = document.getElementById('scanPulse');
+    const scanStatusText = document.getElementById('scanStatusText');
+    const networksBody = document.getElementById('networksBody');
+    const savedBody = document.getElementById('savedBody');
+    const rescanBtn = document.getElementById('rescanBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const connIconRing = document.getElementById('connIconRing');
+    const connSsid = document.getElementById('connSsid');
+    const connMeta = document.getElementById('connMeta');
+    const connStats = document.getElementById('connStats');
+
+    const modal = document.getElementById('connectModal');
+    const modalSsid = document.getElementById('modalSsid');
+    const modalHint = document.getElementById('modalHint').querySelector('span');
+    const modalError = document.getElementById('modalError');
+    const modalConnect = document.getElementById('modalConnect');
+    const modalCancel = document.getElementById('modalCancel');
+    const modalClose = document.getElementById('modalClose');
+    const pwInput = document.getElementById('pw');
+
+    let pendingConnectSsid = null;
+    let scanning = false;
+
+    function showToast(message, isError) {
+        const toast = document.getElementById('toast');
+        const icon = toast.querySelector('i');
+        toast.querySelector('#toastText').textContent = message;
+        toast.className = isError ? 'error show' : 'success show';
+        icon.className = isError ? 'fa-solid fa-circle-exclamation' : 'fa-solid fa-circle-check';
+        clearTimeout(toast._hideTimer);
+        toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+    }
+
+    function signalStrength(dbmOrPercent) {
+        // nmcli SIGNAL is a 0-100 quality percentage
+        if (dbmOrPercent >= 70) return 4;
+        if (dbmOrPercent >= 45) return 3;
+        if (dbmOrPercent >= 20) return 2;
+        return 1;
+    }
+
+    function signalBadgeClass(strength) {
+        if (strength >= 3) return '';
+        if (strength === 2) return 'mid';
+        return 'weak';
+    }
+
+    function signalBarsHtml(strength) {
+        return `<span class="signal-bars strength-${strength}"><i></i><i></i><i></i><i></i></span>`;
+    }
+
+    function securityBadge(security) {
+        const isOpen = security === 'Open';
+        return `<span class="badge badge-sec ${isOpen ? 'open' : ''}">${security}</span>`;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function renderStatus(data) {
+        if (!data.success) {
+            connSsid.textContent = data.error || 'Unable to read connection status';
+            connMeta.innerHTML = '';
+            connStats.style.display = 'none';
+            disconnectBtn.style.display = 'none';
+            connIconRing.classList.add('disconnected');
+            return;
+        }
+
+        if (!data.connected) {
+            connSsid.textContent = 'Not Connected';
+            connMeta.innerHTML = `<span><i class="fa-solid fa-ethernet"></i> ${escapeHtml(data.interface || 'no interface')}</span>`;
+            connStats.style.display = 'none';
+            disconnectBtn.style.display = 'none';
+            connIconRing.classList.add('disconnected');
+            return;
+        }
+
+        connIconRing.classList.remove('disconnected');
+        connSsid.textContent = data.ssid;
+        connMeta.innerHTML = `
+            <span><i class="fa-solid fa-globe"></i> ${escapeHtml(data.ip_address || 'no IP')}</span>
+            <span><i class="fa-solid fa-signal"></i> ${data.signal != null ? data.signal + '%' : 'n/a'}</span>
+            <span><i class="fa-solid fa-lock"></i> ${escapeHtml(data.security)}</span>
+        `;
+        connStats.style.display = 'grid';
+        connStats.innerHTML = `
+            <div class="stat-box"><span class="stat-label">Interface</span><span class="stat-value">${escapeHtml(data.interface)}</span></div>
+            <div class="stat-box"><span class="stat-label">Band / Channel</span><span class="stat-value">${escapeHtml(data.band || '?')} &middot; Ch ${data.channel != null ? data.channel : '?'}</span></div>
+            <div class="stat-box"><span class="stat-label">Security</span><span class="stat-value">${escapeHtml(data.security)}</span></div>
+        `;
+        disconnectBtn.style.display = 'inline-flex';
+    }
+
+    function renderNetworks(data) {
+        if (!data.success) {
+            networksBody.innerHTML = `<tr class="empty-row"><td colspan="6">${escapeHtml(data.error || 'Scan failed')}</td></tr>`;
+            scanStatusText.textContent = data.error || 'Scan failed';
+            return;
+        }
+
+        if (!data.networks.length) {
+            networksBody.innerHTML = '<tr class="empty-row"><td colspan="6">No networks found. Try rescanning.</td></tr>';
+        } else {
+            networksBody.innerHTML = data.networks.map(net => {
+                const strength = signalStrength(net.signal);
+                const connectedRow = net.connected;
+                const actionCell = connectedRow
+                    ? `<button class="btn btn-red btn-sm" data-disconnect="1"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
+                    : `<button class="btn btn-blue btn-sm" data-connect-ssid="${escapeHtml(net.ssid)}" data-connect-security="${escapeHtml(net.security)}"><i class="fa-solid fa-plug"></i> Connect</button>`;
+                return `
+                    <tr class="${connectedRow ? 'row-connected' : ''}">
+                        <td class="ssid-cell">
+                            ${net.security !== 'Open' ? '<i class="fa-solid fa-lock"></i>' : ''}
+                            ${escapeHtml(net.ssid)}
+                            ${connectedRow ? '<span class="badge badge-connected">Connected</span>' : ''}
+                        </td>
+                        <td>${signalBarsHtml(strength)} <span class="badge badge-signal ${signalBadgeClass(strength)}">${net.signal}%</span></td>
+                        <td>${securityBadge(net.security)}</td>
+                        <td>${escapeHtml(net.band || '?')}</td>
+                        <td>${net.channel != null ? net.channel : '?'}</td>
+                        <td style="text-align:right;">${actionCell}</td>
+                    </tr>`;
+            }).join('');
+        }
+
+        scanStatusText.textContent = `Last scan at ${data.meta.timestamp} on ${data.interface} · ${data.meta.total} networks found`;
+    }
+
+    function renderSaved(data) {
+        if (!data.success) {
+            savedBody.innerHTML = `<tr class="empty-row"><td colspan="3">${escapeHtml(data.error || 'Failed to load saved networks')}</td></tr>`;
+            return;
+        }
+        if (!data.saved.length) {
+            savedBody.innerHTML = '<tr class="empty-row"><td colspan="3">No saved networks yet.</td></tr>';
+            return;
+        }
+        savedBody.innerHTML = data.saved.map(s => `
+            <tr>
+                <td class="ssid-cell"><i class="fa-solid fa-lock"></i> ${escapeHtml(s.name)}</td>
+                <td>${s.autoconnect ? '<span class="badge badge-signal">Yes</span>' : '<span class="badge badge-sec">No</span>'}</td>
+                <td style="text-align:right;">
+                    <button class="btn btn-blue btn-sm" data-connect-ssid="${escapeHtml(s.name)}" data-connect-security="WPA2"><i class="fa-solid fa-plug"></i> Connect</button>
+                    <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
+                </td>
+            </tr>`).join('');
+    }
+
+    async function fetchStatus() {
+        try {
+            const res = await fetch('/api/status');
+            renderStatus(await res.json());
+        } catch (e) {
+            renderStatus({ success: false, error: 'Network error while fetching status.' });
+        }
+    }
+
+    async function fetchScan() {
+        if (scanning) return;
+        scanning = true;
+        scanPulse.classList.add('scanning');
+        scanPulse.classList.remove('idle');
+        scanStatusText.textContent = 'Scanning for networks…';
+        try {
+            const res = await fetch('/api/scan');
+            renderNetworks(await res.json());
+        } catch (e) {
+            renderNetworks({ success: false, error: 'Network error while scanning.' });
+        } finally {
+            scanning = false;
+            scanPulse.classList.remove('scanning');
+            scanPulse.classList.add('idle');
+        }
+    }
+
+    async function fetchSaved() {
+        try {
+            const res = await fetch('/api/saved');
+            renderSaved(await res.json());
+        } catch (e) {
+            renderSaved({ success: false, error: 'Network error while loading saved networks.' });
+        }
+    }
+
+    function refreshAll() {
+        fetchStatus();
+        fetchScan();
+        fetchSaved();
+    }
+
+    function openConnectModal(ssid, security) {
+        pendingConnectSsid = ssid;
+        modalSsid.textContent = `Connect to ${ssid}`;
+        modalHint.textContent = `Security: ${security}`;
+        modalError.classList.remove('show');
+        pwInput.value = '';
+        modal.classList.add('show');
+        setTimeout(() => pwInput.focus(), 50);
+    }
+
+    function closeConnectModal() {
+        modal.classList.remove('show');
+        pendingConnectSsid = null;
+    }
+
+    async function connect(ssid, password) {
+        try {
+            const res = await fetch('/api/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ssid, password })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message || `Connected to ${ssid}.`, false);
+                closeConnectModal();
+                refreshAll();
+            } else {
+                if (modal.classList.contains('show')) {
+                    modalError.textContent = data.error;
+                    modalError.classList.add('show');
+                } else {
+                    showToast(data.error, true);
+                }
+            }
+        } catch (e) {
+            const message = 'Network error while connecting.';
+            if (modal.classList.contains('show')) {
+                modalError.textContent = message;
+                modalError.classList.add('show');
+            } else {
+                showToast(message, true);
+            }
+        }
+    }
+
+    async function disconnect() {
+        disconnectBtn.disabled = true;
+        try {
+            const res = await fetch('/api/disconnect', { method: 'POST' });
+            const data = await res.json();
+            showToast(data.message || data.error, !data.success);
+            refreshAll();
+        } catch (e) {
+            showToast('Network error while disconnecting.', true);
+        } finally {
+            disconnectBtn.disabled = false;
+        }
+    }
+
+    async function forget(name) {
+        try {
+            const res = await fetch('/api/forget', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await res.json();
+            showToast(data.message || data.error, !data.success);
+            fetchSaved();
+        } catch (e) {
+            showToast('Network error while forgetting network.', true);
+        }
+    }
+
+    // Event delegation for dynamically rendered rows
+    document.addEventListener('click', (e) => {
+        const connectBtn = e.target.closest('[data-connect-ssid]');
+        if (connectBtn) {
+            const ssid = connectBtn.getAttribute('data-connect-ssid');
+            const security = connectBtn.getAttribute('data-connect-security');
+            if (security === 'Open') {
+                connect(ssid, '');
+            } else {
+                openConnectModal(ssid, security);
+            }
+            return;
+        }
+        if (e.target.closest('[data-disconnect]')) {
+            disconnect();
+            return;
+        }
+        const forgetBtn = e.target.closest('[data-forget]');
+        if (forgetBtn) {
+            forget(forgetBtn.getAttribute('data-forget'));
+        }
+    });
+
+    rescanBtn.addEventListener('click', fetchScan);
+    disconnectBtn.addEventListener('click', disconnect);
+    modalCancel.addEventListener('click', closeConnectModal);
+    modalClose.addEventListener('click', closeConnectModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeConnectModal(); });
+    modalConnect.addEventListener('click', () => {
+        if (pendingConnectSsid) connect(pendingConnectSsid, pwInput.value);
+    });
+    pwInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') modalConnect.click();
+    });
+
+    refreshAll();
+    setInterval(fetchStatus, 10000);
+})();
+</script>
+</body>
+</html>

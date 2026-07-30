@@ -207,6 +207,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/wificonnect/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">WiFi Connection Manager</h2>
+                        <span class="path-badge">/wificonnect/</span>
+                    </div>
+                    <p class="card-desc">Scan for nearby networks, connect or disconnect the wireless interface, and manage saved WiFi profiles.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <footer>
@@ -232,7 +245,8 @@
             var endpoints = [
                 '/wifimon/api/hostname',
                 '/iperfserver/api/hostname',
-                '/iperf/api/hostname'
+                '/iperf/api/hostname',
+                '/wificonnect/api/hostname'
             ];
 
             (function tryNext(i) {
