@@ -200,11 +200,17 @@ def api_scan():
             "band": classify_band(freq_mhz),
         })
 
-    # De-duplicate SSIDs seen on multiple BSSIDs, keeping the strongest signal
+    # De-duplicate SSIDs seen on multiple BSSIDs (e.g. mesh/repeater setups).
+    # The connected BSSID always wins, regardless of signal, so the "Connected"
+    # state isn't lost behind a stronger unconnected AP sharing the same SSID.
     best_by_ssid = {}
     for net in networks:
         existing = best_by_ssid.get(net["ssid"])
-        if not existing or net["signal"] > existing["signal"]:
+        if not existing:
+            best_by_ssid[net["ssid"]] = net
+        elif net["connected"] and not existing["connected"]:
+            best_by_ssid[net["ssid"]] = net
+        elif net["connected"] == existing["connected"] and net["signal"] > existing["signal"]:
             best_by_ssid[net["ssid"]] = net
     deduped = sorted(best_by_ssid.values(), key=lambda n: n["signal"], reverse=True)
 

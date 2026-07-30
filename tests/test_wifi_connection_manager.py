@@ -124,6 +124,26 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertEqual(strong['signal'], 90)
         self.assertEqual(strong['security'], 'Open')
 
+    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_scan_keeps_connected_bssid_even_with_weaker_signal(self, mock_run, mock_iface):
+        # Mesh/repeater setups can broadcast one SSID from multiple BSSIDs. The
+        # connected one must win the de-dup even if a sibling AP reports a
+        # stronger signal, or the UI loses track of which network is active.
+        mock_iface.return_value = "wlan0"
+        mock_run.return_value = (
+            "*:MeshNet:40:WPA2:1:2412 MHz:AA:BB:CC:DD:EE:01\n"
+            " :MeshNet:90:WPA2:11:2462 MHz:AA:BB:CC:DD:EE:02\n",
+            None,
+        )
+        response = self.client.get('/api/scan')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(len(data['networks']), 1)
+        mesh = data['networks'][0]
+        self.assertTrue(mesh['connected'])
+        self.assertEqual(mesh['signal'], 40)
+
     def test_api_connect_requires_ssid(self):
         response = self.client.post('/api/connect', json={})
         self.assertEqual(response.status_code, 400)

@@ -351,6 +351,8 @@
     let pendingConnectSsid = null;
     let scanning = false;
     let savedNetworkNames = new Set();
+    let currentConnectionName = null;
+    let lastSavedData = null;
 
     function showToast(message, isError) {
         const toast = document.getElementById('toast');
@@ -398,6 +400,8 @@
             connStats.style.display = 'none';
             disconnectBtn.style.display = 'none';
             connIconRing.classList.add('disconnected');
+            currentConnectionName = null;
+            renderSavedTable();
             return;
         }
 
@@ -407,6 +411,8 @@
             connStats.style.display = 'none';
             disconnectBtn.style.display = 'none';
             connIconRing.classList.add('disconnected');
+            currentConnectionName = null;
+            renderSavedTable();
             return;
         }
 
@@ -424,6 +430,8 @@
             <div class="stat-box"><span class="stat-label">Security</span><span class="stat-value">${escapeHtml(data.security)}</span></div>
         `;
         disconnectBtn.style.display = 'inline-flex';
+        currentConnectionName = data.connection_name || data.ssid;
+        renderSavedTable();
     }
 
     function renderNetworks(data) {
@@ -462,7 +470,17 @@
     }
 
     function renderSaved(data) {
+        lastSavedData = data;
         savedNetworkNames = new Set(data.success ? data.saved.map(s => s.name) : []);
+        renderSavedTable();
+    }
+
+    // Re-render the saved-networks table from cached data. Called whenever either
+    // the saved list or the connection status changes, since they load independently
+    // and either one arriving may change what this table should show.
+    function renderSavedTable() {
+        const data = lastSavedData;
+        if (!data) return;
 
         if (!data.success) {
             savedBody.innerHTML = `<tr class="empty-row"><td colspan="3">${escapeHtml(data.error || 'Failed to load saved networks')}</td></tr>`;
@@ -472,15 +490,24 @@
             savedBody.innerHTML = '<tr class="empty-row"><td colspan="3">No saved networks yet.</td></tr>';
             return;
         }
-        savedBody.innerHTML = data.saved.map(s => `
-            <tr>
-                <td class="ssid-cell"><i class="fa-solid fa-lock"></i> ${escapeHtml(s.name)}</td>
-                <td>${s.autoconnect ? '<span class="badge badge-signal">Yes</span>' : '<span class="badge badge-sec">No</span>'}</td>
-                <td style="text-align:right;">
-                    <button class="btn btn-blue btn-sm" data-connect-saved="${escapeHtml(s.name)}"><i class="fa-solid fa-plug"></i> Connect</button>
-                    <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
-                </td>
-            </tr>`).join('');
+        savedBody.innerHTML = data.saved.map(s => {
+            const isConnected = !!currentConnectionName && s.name === currentConnectionName;
+            const connectAction = isConnected
+                ? `<button class="btn btn-red btn-sm" data-disconnect="1"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
+                : `<button class="btn btn-blue btn-sm" data-connect-saved="${escapeHtml(s.name)}"><i class="fa-solid fa-plug"></i> Connect</button>`;
+            return `
+                <tr class="${isConnected ? 'row-connected' : ''}">
+                    <td class="ssid-cell">
+                        <i class="fa-solid fa-lock"></i> ${escapeHtml(s.name)}
+                        ${isConnected ? '<span class="badge badge-connected">Connected</span>' : ''}
+                    </td>
+                    <td>${s.autoconnect ? '<span class="badge badge-signal">Yes</span>' : '<span class="badge badge-sec">No</span>'}</td>
+                    <td style="text-align:right;">
+                        ${connectAction}
+                        <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
+                    </td>
+                </tr>`;
+        }).join('');
     }
 
     async function fetchStatus() {
