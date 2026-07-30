@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import socket
 import sys
 import unittest
 from unittest.mock import patch
@@ -26,6 +27,14 @@ class TestIPerfServerManager(unittest.TestCase):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'iPerf3 Server Manager', response.data)
+
+    def test_index_route_displays_hostname(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        # Every GUI screen must display the host it is served from
+        self.assertIn('host-badge', html)
+        self.assertIn(socket.gethostname(), html)
 
     def test_list_servers_route(self):
         response = self.client.get('/api/servers')

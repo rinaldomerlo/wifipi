@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import socket
 import sys
 import unittest
 from unittest.mock import patch, MagicMock
@@ -27,6 +28,14 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         self.assertIn(b'Network Congestion Generator', response.data)
         self.assertIn(b'Server IP Address', response.data)
         self.assertIn(b'Port', response.data)
+
+    def test_index_route_displays_hostname(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        # Every GUI screen must display the host it is served from
+        self.assertIn('host-badge', html)
+        self.assertIn(socket.gethostname(), html)
 
     def test_start_route_invalid_ip(self):
         response = self.client.post('/start', json={"server_ip": "invalid-ip"})

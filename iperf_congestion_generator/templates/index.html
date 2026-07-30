@@ -124,6 +124,30 @@
             letter-spacing: 1.5px;
         }
 
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i {
+            color: var(--color-blue);
+        }
+
+        .host-badge strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
         .nav-links {
             display: flex;
             align-items: center;
@@ -356,6 +380,9 @@
                     <h1>IPERF<span>3</span></h1>
                     <span class="subtitle">Network Congestion Generator</span>
                 </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
             </div>
             <div class="nav-links">
                 <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>

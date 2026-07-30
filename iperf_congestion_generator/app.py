@@ -21,6 +21,14 @@ test_lock = threading.Lock()
 output_queue = queue.Queue()
 
 
+def get_hostname() -> str:
+    """Return the hostname of the machine serving this app (shown in the GUI header)."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return "unknown-host"
+
+
 def is_valid_ip(ip: str) -> bool:
     pattern = r"^\d{1,3}(\.\d{1,3}){3}$"
     return bool(re.match(pattern, ip))
@@ -178,7 +186,7 @@ def run_iperf3(server_ip, server_port, duration_minutes, bind_interface, bandwid
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", hostname=get_hostname())
 
 
 @app.route("/scan", methods=["POST"])

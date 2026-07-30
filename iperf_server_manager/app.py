@@ -16,6 +16,14 @@ from flask import Flask, render_template, request, jsonify
 app = Flask(__name__)
 
 
+def get_hostname() -> str:
+    """Return the hostname of the machine serving this app (shown in the GUI header)."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return "unknown-host"
+
+
 def parse_port_from_args(cmdline_str: str) -> int:
     """Extract port number from iperf3 command line or service file string. Default is 5201."""
     match = re.search(r'(?:-p|--port)\s+([0-9]+)', cmdline_str)
@@ -213,7 +221,7 @@ def get_process_cmdline(pid: int) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", hostname=get_hostname())
 
 
 @app.route("/api/servers", methods=["GET"])

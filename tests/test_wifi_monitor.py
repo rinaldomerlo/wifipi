@@ -1,5 +1,6 @@
 import importlib
 import os
+import socket
 import sys
 import unittest
 
@@ -27,6 +28,14 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
         self.assertIn('--bg-dark:', html)
         self.assertIn('--glass-bg:', html)
         self.assertIn('WIFIMON', html)
+
+    def test_index_route_displays_hostname(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        # Every GUI screen must display the host it is served from
+        self.assertIn('host-badge', html)
+        self.assertIn(socket.gethostname(), html)
 
     def test_api_interfaces_route(self):
         response = self.client.get('/api/interfaces')

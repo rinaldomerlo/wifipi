@@ -58,6 +58,14 @@ Both applications share a unified design system:
 - **Design Style**: Modern glassmorphism with dark gradient backgrounds, translucent cards, and subtle borders.
 - **Typography**: Google Fonts (`Outfit` for headings/accents, `Space Grotesk` for body/mono metrics).
 - **Icons**: FontAwesome icons for buttons, status indicators, and navigation tabs.
+- **Hostname Display (mandatory)**: *Every* GUI screen must show the host it is served from, so a browser
+  tab can always be traced back to a specific Raspberry Pi.
+  - Flask apps expose `get_hostname()` (a guarded `socket.gethostname()`) in `app.py`, pass it to
+    `render_template(..., hostname=...)`, and render it in the `.app-header` as a `.host-badge` pill.
+  - `www/index.html` is static with no backend, so it populates `#hostName` from
+    `window.location.hostname` via a small inline script.
+  - Each app's test module asserts the badge and hostname appear in the rendered index page.
+  - Any newly added screen inherits this requirement.
 
 ---
 

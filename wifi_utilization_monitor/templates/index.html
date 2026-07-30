@@ -153,6 +153,30 @@ body {
     letter-spacing: 1.5px;
 }
 
+/* Hostname badge — identifies which machine is serving this GUI */
+.host-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--font-heading);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(8, 9, 15, 0.4);
+    border: 1px solid var(--glass-border);
+    padding: 0.4rem 0.85rem;
+    border-radius: 50px;
+    white-space: nowrap;
+}
+
+.host-badge i {
+    color: var(--color-blue);
+}
+
+.host-badge strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 /* Status Banner */
 .status-banner {
     display: flex;
@@ -831,8 +855,9 @@ body {
     
     .logo {
         justify-content: center;
+        flex-wrap: wrap;
     }
-    
+
     .header-controls {
         flex-direction: column;
         align-items: stretch;
@@ -856,8 +881,11 @@ body {
                     <h1>WIFI<span>MON</span></h1>
                     <span class="subtitle">Live Spectrum & Channel Monitor</span>
                 </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
             </div>
-            
+
             <div class="status-banner" id="statusBanner">
                 <span class="pulse-dot idle" id="statusPulse"></span>
                 <span class="status-text" id="statusText">System Idle</span>

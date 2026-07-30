@@ -137,6 +137,24 @@
             border-top: 1px solid var(--card-border);
             padding-top: 1rem;
         }
+
+        /* Hostname badge — identifies which machine is serving this page */
+        .host-badge {
+            display: inline-block;
+            margin-top: 0.65rem;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+        }
+
+        .host-badge strong {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -145,6 +163,9 @@
         <header>
             <h1>WiFi<span>Pi</span> Testing Tools</h1>
             <p class="subtitle">Wireless spectrum analysis & network performance tools</p>
+            <span class="host-badge" title="Host serving this page">
+                Host: <strong id="hostName">&mdash;</strong>
+            </span>
         </header>
 
         <div class="apps-grid">
@@ -192,6 +213,16 @@
             <p>WiFi<span>Pi</span> &bull; Hosted on Raspberry Pi</p>
         </footer>
     </div>
+
+    <script>
+        // Static page — no backend, so derive the host from the address used to reach it.
+        (function () {
+            var el = document.getElementById('hostName');
+            if (el) {
+                el.textContent = window.location.hostname || 'localhost';
+            }
+        })();
+    </script>
 
 </body>
 </html>

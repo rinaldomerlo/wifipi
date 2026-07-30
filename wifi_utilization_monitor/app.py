@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import socket
 import subprocess
 from datetime import datetime
 from flask import Flask, jsonify, render_template, request
@@ -10,6 +11,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from parser import parse_scan_output
 
 app = Flask(__name__)
+
+def get_hostname():
+    """Return the hostname of the machine serving this app (shown in the GUI header)."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return 'unknown-host'
 
 def get_wireless_interfaces():
     """List wireless interfaces on Linux using 'iw dev' and /proc/net/wireless."""
@@ -115,7 +123,7 @@ def resolve_vendor(bssid):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', hostname=get_hostname())
 
 @app.route('/api/interfaces')
 def api_interfaces():
