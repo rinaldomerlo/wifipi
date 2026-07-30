@@ -482,7 +482,7 @@
 
     async function fetchStatus() {
         try {
-            const res = await fetch('/api/status');
+            const res = await fetch('api/status');
             renderStatus(await res.json());
         } catch (e) {
             renderStatus({ success: false, error: 'Network error while fetching status.' });
@@ -496,7 +496,7 @@
         scanPulse.classList.remove('idle');
         scanStatusText.textContent = 'Scanning for networks…';
         try {
-            const res = await fetch('/api/scan');
+            const res = await fetch('api/scan');
             renderNetworks(await res.json());
         } catch (e) {
             renderNetworks({ success: false, error: 'Network error while scanning.' });
@@ -509,7 +509,7 @@
 
     async function fetchSaved() {
         try {
-            const res = await fetch('/api/saved');
+            const res = await fetch('api/saved');
             renderSaved(await res.json());
         } catch (e) {
             renderSaved({ success: false, error: 'Network error while loading saved networks.' });
@@ -539,7 +539,7 @@
 
     async function connect(ssid, password) {
         try {
-            const res = await fetch('/api/connect', {
+            const res = await fetch('api/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ssid, password })
@@ -571,7 +571,7 @@
     async function disconnect() {
         disconnectBtn.disabled = true;
         try {
-            const res = await fetch('/api/disconnect', { method: 'POST' });
+            const res = await fetch('api/disconnect', { method: 'POST' });
             const data = await res.json();
             showToast(data.message || data.error, !data.success);
             refreshAll();
@@ -584,7 +584,7 @@
 
     async function forget(name) {
         try {
-            const res = await fetch('/api/forget', {
+            const res = await fetch('api/forget', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name })
