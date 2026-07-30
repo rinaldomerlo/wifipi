@@ -474,7 +474,7 @@
                 <td class="ssid-cell"><i class="fa-solid fa-lock"></i> ${escapeHtml(s.name)}</td>
                 <td>${s.autoconnect ? '<span class="badge badge-signal">Yes</span>' : '<span class="badge badge-sec">No</span>'}</td>
                 <td style="text-align:right;">
-                    <button class="btn btn-blue btn-sm" data-connect-ssid="${escapeHtml(s.name)}" data-connect-security="WPA2"><i class="fa-solid fa-plug"></i> Connect</button>
+                    <button class="btn btn-blue btn-sm" data-connect-saved="${escapeHtml(s.name)}"><i class="fa-solid fa-plug"></i> Connect</button>
                     <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
                 </td>
             </tr>`).join('');
@@ -599,6 +599,12 @@
 
     // Event delegation for dynamically rendered rows
     document.addEventListener('click', (e) => {
+        const savedConnectBtn = e.target.closest('[data-connect-saved]');
+        if (savedConnectBtn) {
+            // NetworkManager already has credentials for saved profiles — no password needed.
+            connect(savedConnectBtn.getAttribute('data-connect-saved'), '');
+            return;
+        }
         const connectBtn = e.target.closest('[data-connect-ssid]');
         if (connectBtn) {
             const ssid = connectBtn.getAttribute('data-connect-ssid');
