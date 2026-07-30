@@ -12,6 +12,7 @@ A Flask-based web application to scan for nearby WiFi networks, connect or disco
 | **Network Scanning** | Scans for nearby WiFi networks via `nmcli device wifi list`, de-duplicated by SSID and sorted by signal strength. |
 | **Connect / Disconnect** | Connect to open networks immediately, or secured networks via a password prompt. Disconnect the active connection with one click. |
 | **Saved Networks** | Lists NetworkManager connection profiles, with the ability to reconnect or forget (delete) them. |
+| **Auto-Connect Control** | Per-network toggle to enable/disable NetworkManager's auto-connect, useful in test-lab environments where automatic roaming/reconnection is unwanted. |
 
 ---
 
@@ -50,3 +51,4 @@ youruser ALL=(ALL) NOPASSWD: /usr/bin/nmcli
 - `POST /api/connect` — Connect to a network (`{"ssid": "HomeNetwork", "password": "optional"}`).
 - `POST /api/disconnect` — Disconnect the wireless interface from its current network.
 - `POST /api/forget` — Delete a saved connection profile (`{"name": "HomeNetwork"}`).
+- `POST /api/autoconnect` — Enable/disable auto-connect for a saved profile (`{"name": "HomeNetwork", "enabled": false}`).

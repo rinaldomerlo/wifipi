@@ -296,6 +296,27 @@ def api_forget():
     return jsonify({"success": True, "message": f"Forgot {name}."})
 
 
+@app.route("/api/autoconnect", methods=["POST"])
+def api_autoconnect():
+    """Enable or disable auto-connect for a saved WiFi connection profile."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    enabled = bool(data.get("enabled"))
+
+    if not name:
+        return jsonify({"success": False, "error": "Connection name is required."}), 400
+
+    value = "yes" if enabled else "no"
+    out, err = _run_nmcli(["connection", "modify", name, "autoconnect", value], timeout=NMCLI_TIMEOUT)
+    if err:
+        return jsonify({"success": False, "error": f"Failed to update auto-connect: {err}"}), 200
+
+    return jsonify({
+        "success": True,
+        "message": f"Auto-connect {'enabled' if enabled else 'disabled'} for {name}.",
+    })
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5003))
     if len(sys.argv) > 1:

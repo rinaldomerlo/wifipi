@@ -222,6 +222,20 @@
         .modal-actions { display: flex; gap: 0.75rem; }
         .modal-actions button { flex: 1; margin: 0; }
 
+        /* Auto-connect toggle — lets a test-lab operator take manual control per saved network */
+        .toggle-switch {
+            position: relative; width: 42px; height: 22px; border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08); border: 1px solid var(--glass-border);
+            cursor: pointer; padding: 0; flex-shrink: 0; transition: background 0.2s ease, border-color 0.2s ease;
+        }
+        .toggle-switch.on { background: rgba(0, 230, 118, 0.25); border-color: rgba(0, 230, 118, 0.4); }
+        .toggle-switch:disabled { opacity: 0.5; cursor: not-allowed; }
+        .toggle-knob {
+            position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+            background: var(--text-secondary); transition: left 0.2s ease, background 0.2s ease;
+        }
+        .toggle-switch.on .toggle-knob { left: 22px; background: var(--color-green); }
+
         @media (max-width: 768px) {
             .app-header { flex-direction: column; align-items: stretch; }
             .logo { justify-content: center; }
@@ -501,7 +515,11 @@
                         <i class="fa-solid fa-lock"></i> ${escapeHtml(s.name)}
                         ${isConnected ? '<span class="badge badge-connected">Connected</span>' : ''}
                     </td>
-                    <td>${s.autoconnect ? '<span class="badge badge-signal">Yes</span>' : '<span class="badge badge-sec">No</span>'}</td>
+                    <td>
+                        <button class="toggle-switch ${s.autoconnect ? 'on' : ''}" data-toggle-autoconnect="${escapeHtml(s.name)}" data-current="${s.autoconnect ? '1' : '0'}" title="${s.autoconnect ? 'Auto-connect enabled — click to disable' : 'Auto-connect disabled — click to enable'}">
+                            <span class="toggle-knob"></span>
+                        </button>
+                    </td>
                     <td style="text-align:right;">
                         ${connectAction}
                         <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
@@ -627,8 +645,32 @@
         }
     }
 
+    async function setAutoconnect(name, enabled) {
+        try {
+            const res = await fetch('api/autoconnect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, enabled })
+            });
+            const data = await res.json();
+            showToast(data.message || data.error, !data.success);
+            fetchSaved();
+        } catch (e) {
+            showToast('Network error while updating auto-connect.', true);
+            fetchSaved();
+        }
+    }
+
     // Event delegation for dynamically rendered rows
     document.addEventListener('click', (e) => {
+        const toggleBtn = e.target.closest('[data-toggle-autoconnect]');
+        if (toggleBtn) {
+            const name = toggleBtn.getAttribute('data-toggle-autoconnect');
+            const currentlyOn = toggleBtn.getAttribute('data-current') === '1';
+            toggleBtn.disabled = true;
+            setAutoconnect(name, !currentlyOn);
+            return;
+        }
         const savedConnectBtn = e.target.closest('[data-connect-saved]');
         if (savedConnectBtn) {
             // NetworkManager already has credentials for saved profiles — no password needed.

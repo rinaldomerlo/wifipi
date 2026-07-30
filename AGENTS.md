@@ -58,11 +58,17 @@ Project Root Structure:
   `dhcpcd` interaction. All output is parsed from `nmcli -t` (terse, colon-delimited) fields; colons
   embedded in SSIDs are backslash-escaped by `nmcli` and unescaped by `_split_terse()` in `app.py`.
   - `GET /api/status` — current connection details for the detected WiFi device.
-  - `GET /api/scan` — `nmcli device wifi list --rescan yes`, de-duplicated by SSID (keeps the strongest BSSID).
+  - `GET /api/scan` — `nmcli device wifi list --rescan yes`, de-duplicated by SSID: the connected BSSID
+    always wins (so mesh/repeater setups with one SSID on multiple APs don't lose the "Connected" state
+    behind a stronger unconnected AP), otherwise the strongest signal wins.
   - `GET /api/saved` / `POST /api/forget` — saved connection profiles (`nmcli connection show`/`delete`).
+  - `POST /api/autoconnect` — enable/disable NetworkManager's auto-connect per saved profile
+    (`nmcli connection modify <name> autoconnect yes|no`), surfaced as a toggle switch in the Saved
+    Networks table — useful for test-lab setups where unattended reconnection is unwanted.
   - `POST /api/connect` / `POST /api/disconnect` — `nmcli device wifi connect` / `nmcli device disconnect`.
     nmcli's stderr is mapped to a friendlier message (e.g. "Secrets were required..." → "Incorrect password.")
-    by `friendly_connect_error()`.
+    by `friendly_connect_error()`. The frontend skips the password modal when the SSID is open or matches
+    an already-saved profile (NetworkManager already has secrets for the latter).
 - **System Privilege Requirement**: Requires NetworkManager (`nmcli`) to be the active network backend —
   it will not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
   Executes all state-changing calls via `sudo nmcli ...`.

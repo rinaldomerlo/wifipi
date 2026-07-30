@@ -186,6 +186,37 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertEqual(len(data['saved']), 1)
         self.assertEqual(data['saved'][0]['name'], 'HomeNetwork')
 
+    def test_api_autoconnect_requires_name(self):
+        response = self.client.post('/api/autoconnect', json={"enabled": True})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Connection name is required", response.get_json()['error'])
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_autoconnect_enable(self, mock_run):
+        mock_run.return_value = ("", None)
+        response = self.client.post('/api/autoconnect', json={"name": "HomeNetwork", "enabled": True})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIn("enabled", data['message'])
+        mock_run.assert_called_once_with(["connection", "modify", "HomeNetwork", "autoconnect", "yes"], timeout=conn_app_module.NMCLI_TIMEOUT)
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_autoconnect_disable(self, mock_run):
+        mock_run.return_value = ("", None)
+        response = self.client.post('/api/autoconnect', json={"name": "HomeNetwork", "enabled": False})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIn("disabled", data['message'])
+        mock_run.assert_called_once_with(["connection", "modify", "HomeNetwork", "autoconnect", "no"], timeout=conn_app_module.NMCLI_TIMEOUT)
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_autoconnect_nmcli_error(self, mock_run):
+        mock_run.return_value = (None, "unknown connection 'Ghost'")
+        response = self.client.post('/api/autoconnect', json={"name": "Ghost", "enabled": True})
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn("Failed to update auto-connect", data['error'])
+
 
 if __name__ == '__main__':
     unittest.main()
