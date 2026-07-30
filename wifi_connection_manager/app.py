@@ -317,6 +317,34 @@ def api_autoconnect():
     })
 
 
+@app.route("/api/reveal", methods=["POST"])
+def api_reveal():
+    """Reveal the saved WPA/WPA2 pre-shared key for a saved connection profile.
+
+    Requires root (via sudo) — NetworkManager redacts secrets for unprivileged callers
+    even with --show-secrets. Open networks, or profiles with no stored PSK (e.g.
+    802.1x enterprise), have no 802-11-wireless-security.psk property; that's reported
+    as success with a null password rather than an error.
+    """
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "Connection name is required."}), 400
+
+    out, err = _run_nmcli(
+        ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", name],
+        timeout=NMCLI_TIMEOUT,
+    )
+    if err:
+        if re.search(r"no such property|unknown property", err, re.IGNORECASE):
+            return jsonify({"success": True, "password": None})
+        return jsonify({"success": False, "error": f"Failed to reveal password: {err}"}), 200
+
+    lines = (out or "").strip().splitlines()
+    password = _split_terse(lines[0])[0] if lines else ""
+    return jsonify({"success": True, "password": password or None})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5003))
     if len(sys.argv) > 1:

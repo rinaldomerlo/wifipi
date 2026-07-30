@@ -338,6 +338,23 @@
         </div>
     </div>
 
+    <!-- Reveal-password modal — shows the saved PSK for a Saved Networks entry -->
+    <div class="modal-overlay" id="revealModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-key"></i> <span id="revealTitle">Saved Password</span></h3>
+                <button class="modal-close" id="revealClose"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <label for="revealValue">Password</label>
+            <input type="text" id="revealValue" readonly>
+            <div class="modal-hint" id="revealHint" style="display:none;"><i class="fa-solid fa-circle-info" style="color: var(--color-blue);"></i> <span></span></div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" id="revealCloseBtn">Close</button>
+                <button class="btn btn-blue" id="revealCopyBtn"><i class="fa-solid fa-copy"></i> Copy</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"><i class="fa-solid fa-circle-check"></i><span id="toastText"></span></div>
 
 <script>
@@ -361,6 +378,14 @@
     const modalCancel = document.getElementById('modalCancel');
     const modalClose = document.getElementById('modalClose');
     const pwInput = document.getElementById('pw');
+
+    const revealModal = document.getElementById('revealModal');
+    const revealTitle = document.getElementById('revealTitle');
+    const revealValue = document.getElementById('revealValue');
+    const revealHint = document.getElementById('revealHint').querySelector('span');
+    const revealClose = document.getElementById('revealClose');
+    const revealCloseBtn = document.getElementById('revealCloseBtn');
+    const revealCopyBtn = document.getElementById('revealCopyBtn');
 
     let pendingConnectSsid = null;
     let scanning = false;
@@ -522,6 +547,7 @@
                     </td>
                     <td style="text-align:right;">
                         ${connectAction}
+                        <button class="btn btn-ghost btn-sm" data-reveal="${escapeHtml(s.name)}" title="Reveal saved password"><i class="fa-solid fa-eye"></i></button>
                         <button class="btn btn-ghost btn-sm" data-forget="${escapeHtml(s.name)}"><i class="fa-solid fa-trash"></i> Forget</button>
                     </td>
                 </tr>`;
@@ -661,6 +687,38 @@
         }
     }
 
+    function closeRevealModal() {
+        revealModal.classList.remove('show');
+    }
+
+    async function revealPassword(name) {
+        revealTitle.textContent = `Saved Password — ${name}`;
+        revealValue.value = 'Loading…';
+        revealHint.parentElement.style.display = 'none';
+        revealModal.classList.add('show');
+        try {
+            const res = await fetch('api/reveal', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await res.json();
+            if (data.success && data.password) {
+                revealValue.value = data.password;
+            } else {
+                revealValue.value = '';
+                revealHint.textContent = data.success
+                    ? 'No password saved for this network (open network, or no stored secret).'
+                    : data.error;
+                revealHint.parentElement.style.display = 'flex';
+            }
+        } catch (e) {
+            revealValue.value = '';
+            revealHint.textContent = 'Network error while revealing password.';
+            revealHint.parentElement.style.display = 'flex';
+        }
+    }
+
     // Event delegation for dynamically rendered rows
     document.addEventListener('click', (e) => {
         const toggleBtn = e.target.closest('[data-toggle-autoconnect]');
@@ -696,7 +754,22 @@
         const forgetBtn = e.target.closest('[data-forget]');
         if (forgetBtn) {
             forget(forgetBtn.getAttribute('data-forget'));
+            return;
         }
+        const revealBtn = e.target.closest('[data-reveal]');
+        if (revealBtn) {
+            revealPassword(revealBtn.getAttribute('data-reveal'));
+        }
+    });
+
+    revealClose.addEventListener('click', closeRevealModal);
+    revealCloseBtn.addEventListener('click', closeRevealModal);
+    revealModal.addEventListener('click', (e) => { if (e.target === revealModal) closeRevealModal(); });
+    revealCopyBtn.addEventListener('click', () => {
+        if (!revealValue.value) return;
+        navigator.clipboard.writeText(revealValue.value)
+            .then(() => showToast('Password copied to clipboard.', false))
+            .catch(() => showToast('Could not copy — select and copy manually.', true));
     });
 
     rescanBtn.addEventListener('click', fetchScan);

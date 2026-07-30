@@ -217,6 +217,55 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertFalse(data['success'])
         self.assertIn("Failed to update auto-connect", data['error'])
 
+    def test_api_reveal_requires_name(self):
+        response = self.client.post('/api/reveal', json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Connection name is required", response.get_json()['error'])
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_returns_password(self, mock_run):
+        mock_run.return_value = ("correcthorsebatterystaple\n", None)
+        response = self.client.post('/api/reveal', json={"name": "HomeNetwork"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['password'], 'correcthorsebatterystaple')
+        mock_run.assert_called_once_with(
+            ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "HomeNetwork"],
+            timeout=conn_app_module.NMCLI_TIMEOUT,
+        )
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_unescapes_colons(self, mock_run):
+        mock_run.return_value = (r"pass\:with\:colons" + "\n", None)
+        response = self.client.post('/api/reveal', json={"name": "HomeNetwork"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['password'], 'pass:with:colons')
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_open_network_returns_null_password(self, mock_run):
+        mock_run.return_value = ("", None)
+        response = self.client.post('/api/reveal', json={"name": "Airport_Free_WiFi"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIsNone(data['password'])
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_no_such_property_treated_as_no_password(self, mock_run):
+        mock_run.return_value = (None, "Error: 802-11-wireless-security.psk: no such property.")
+        response = self.client.post('/api/reveal', json={"name": "Office-Lab-VLAN12"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIsNone(data['password'])
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_nmcli_error(self, mock_run):
+        mock_run.return_value = (None, "Error: Ghost - no such connection profile.")
+        response = self.client.post('/api/reveal', json={"name": "Ghost"})
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn("Failed to reveal password", data['error'])
+
 
 if __name__ == '__main__':
     unittest.main()
