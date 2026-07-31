@@ -234,6 +234,14 @@
             color: var(--text-primary);
         }
 
+        input[type="range"] {
+            flex: 1;
+            width: auto;
+            padding: 0;
+            accent-color: var(--color-blue);
+            background: transparent;
+        }
+
         .row {
             display: flex;
             gap: 0.75rem;
@@ -411,6 +419,15 @@
             <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
             <input id="duration" type="number" value="10" min="1">
 
+            <label for="intensity"><i class="fa-solid fa-gauge-high"></i> Browsing Intensity</label>
+            <div class="row" style="gap: 1rem;">
+                <input id="intensity" type="range" min="1" max="10" value="3" oninput="updateIntensityLabel()">
+                <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 6.5em;">3 sessions</span>
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                Runs this many concurrent browsing sessions against the target. Each session still picks its own random pages and think-time independently — intensity scales overall load, not the randomization.
+            </div>
+
             <label for="interface"><i class="fa-solid fa-ethernet"></i> Bind Interface (for LAN scan)</label>
             <select id="interface">
                 <option value="wlan0">wlan0</option>
@@ -442,6 +459,11 @@
         function setRunning(running) {
             document.getElementById('btn-start').disabled = running;
             document.getElementById('btn-stop').disabled  = !running;
+        }
+
+        function updateIntensityLabel() {
+            const val = document.getElementById('intensity').value;
+            document.getElementById('intensity-value').textContent = `${val} session${val == 1 ? '' : 's'}`;
         }
 
         async function scanLAN() {
@@ -490,6 +512,7 @@
             let targetIp   = document.getElementById('target-ip').value.trim();
             let targetPort = parseInt(document.getElementById('target-port').value) || 80;
             const duration = parseInt(document.getElementById('duration').value) || 10;
+            const intensity = parseInt(document.getElementById('intensity').value) || 3;
 
             if (!targetIp) { setStatus('Please enter a target IP address.', 'var(--color-pink)'); return; }
 
@@ -501,7 +524,7 @@
 
             document.getElementById('output').textContent = '';
             setRunning(true);
-            setStatus(`Starting browsing simulation against ${targetIp}:${targetPort}…`, 'var(--color-blue)');
+            setStatus(`Starting browsing simulation (${intensity} session${intensity == 1 ? '' : 's'}) against ${targetIp}:${targetPort}…`, 'var(--color-blue)');
 
             try {
                 const res = await fetch('start', {
@@ -510,7 +533,8 @@
                     body: JSON.stringify({
                         target_ip: targetIp,
                         target_port: targetPort,
-                        duration_minutes: duration
+                        duration_minutes: duration,
+                        intensity: intensity
                     })
                 });
                 const data = await res.json();

@@ -117,31 +117,52 @@ class TestWebBrowsingSimulator(unittest.TestCase):
 
     @patch('web_browsing_simulator.app.threading.Thread')
     def test_start_route_valid_and_ip_port_parsing(self, mock_thread):
-        # Case 1: separate IP and port
+        # Case 1: separate IP and port, explicit intensity of 1 session
         response = self.client.post('/start', json={
             "target_ip": "192.168.1.100",
             "target_port": 80,
             "duration_minutes": 5,
+            "intensity": 1,
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['status'], 'started')
         mock_thread.assert_called_once()
         args = mock_thread.call_args[1]['args']
-        self.assertEqual(args[0], "192.168.1.100")
-        self.assertEqual(args[1], 80)
-        self.assertEqual(args[2], 5)
+        self.assertEqual(args[0], 1)  # session_id
+        self.assertEqual(args[1], "192.168.1.100")
+        self.assertEqual(args[2], 80)
+        self.assertEqual(args[3], 5)
 
         # Case 2: IP:Port string in target_ip
         mock_thread.reset_mock()
         response = self.client.post('/start', json={
             "target_ip": "192.168.1.100:5004",
-            "duration_minutes": 10
+            "duration_minutes": 10,
+            "intensity": 1,
         })
         self.assertEqual(response.status_code, 200)
         mock_thread.assert_called_once()
         args = mock_thread.call_args[1]['args']
-        self.assertEqual(args[0], "192.168.1.100")
-        self.assertEqual(args[1], 5004)
+        self.assertEqual(args[1], "192.168.1.100")
+        self.assertEqual(args[2], 5004)
+
+    @patch('web_browsing_simulator.app.threading.Thread')
+    def test_start_route_intensity_spawns_one_thread_per_session(self, mock_thread):
+        response = self.client.post('/start', json={
+            "target_ip": "192.168.1.100",
+            "duration_minutes": 5,
+            "intensity": 4,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['sessions'], 4)
+        self.assertEqual(mock_thread.call_count, 4)
+        session_ids = sorted(call[1]['args'][0] for call in mock_thread.call_args_list)
+        self.assertEqual(session_ids, [1, 2, 3, 4])
+
+    def test_start_route_invalid_intensity(self):
+        response = self.client.post('/start', json={"target_ip": "192.168.1.100", "intensity": 11})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Intensity must be between 1 and 10", response.get_json()['error'])
 
     def test_stop_route(self):
         response = self.client.post('/stop')

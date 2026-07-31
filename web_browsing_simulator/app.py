@@ -6,7 +6,9 @@ instance serves a randomized corpus of synthetic "pages" (see content_gen.py)
 and can also drive traffic against another instance's corpus: fetch a random
 page's HTML, then its assets with bounded concurrency (mimicking a browser's
 per-host connection limit), then idle for a random think-time before the next
-page -- a bursty pattern instead of iperf3's steady stream.
+page -- a bursty pattern instead of iperf3's steady stream. An "intensity"
+slider (1-10) runs that many such sessions concurrently, each with its own
+independent randomization, so overall load scales without flattening it out.
 """
 
 import ipaddress
@@ -40,12 +42,17 @@ THINK_TIME_RANGE = (2, 8)
 ASSET_CONCURRENCY = 6
 CONTENT_PORT = 5004
 
-# Global state for the running simulation. browsing_active is only ever set inside
+# "Intensity" is the number of concurrent simulated browsing sessions -- each one
+# independently picks its own random pages and think-times, so turning intensity up
+# scales the overall load without reducing the randomization of any single session.
+INTENSITY_RANGE = (1, 10)
+DEFAULT_INTENSITY = 3
+
+# Global state for the running simulation. active_sessions is only ever mutated inside
 # run_browsing_loop itself (mirroring the iperf apps' Popen-object-is-None check) so
-# that it accurately reflects whether the background thread's body is actually running.
-test_thread = None
+# that it accurately reflects how many session threads' bodies are actually running.
 stop_event = threading.Event()
-browsing_active = False
+active_sessions = 0
 test_lock = threading.Lock()
 output_queue = queue.Queue()
 
@@ -160,28 +167,34 @@ def fetch(url: str, timeout: int = 10) -> int:
         return len(resp.read())
 
 
-def run_browsing_loop(target_ip: str, target_port: int, duration_minutes: int) -> None:
-    """Run the browsing simulation in a background thread, streaming summaries to output_queue."""
-    global browsing_active
-
-    end_time = time.time() + duration_minutes * 60
+def run_browsing_loop(session_id: int, target_ip: str, target_port: int, duration_minutes: int) -> None:
+    """
+    Run one simulated browsing session in a background thread, streaming summaries to
+    output_queue. Multiple sessions run concurrently (one per intensity level) and are
+    each fully independent -- their own random page picks and think-times -- so raising
+    intensity scales overall load without touching the randomization of any one session.
+    """
+    global active_sessions
 
     with test_lock:
-        browsing_active = True
+        active_sessions += 1
+
+    end_time = time.time() + duration_minutes * 60
+    tag = f"[s{session_id}] "
 
     try:
         manifest_url = content_url(target_ip, target_port, "manifest.json")
-        output_queue.put(f"Fetching manifest: {manifest_url}\n")
+        output_queue.put(f"{tag}Fetching manifest: {manifest_url}\n")
         with urllib.request.urlopen(manifest_url, timeout=10) as resp:
             manifest = json.loads(resp.read().decode())
 
         pages = manifest.get("pages") or {}
         if not pages:
-            output_queue.put("Target manifest has no pages.\n")
+            output_queue.put(f"{tag}Target manifest has no pages.\n")
             return
 
         page_ids = list(pages.keys())
-        output_queue.put(f"Loaded manifest: {len(page_ids)} pages available.\n")
+        output_queue.put(f"{tag}Loaded manifest: {len(page_ids)} pages available.\n")
 
         while time.time() < end_time and not stop_event.is_set():
             page_id = random.choice(page_ids)
@@ -202,7 +215,7 @@ def run_browsing_loop(target_ip: str, target_port: int, duration_minutes: int) -
             elapsed_s = time.time() - page_start
             throughput_kbps = (total_bytes * 8 / 1000) / elapsed_s if elapsed_s > 0 else 0
             output_queue.put(
-                f"{page_id}: {len(assets) + 1} objects, {total_bytes / 1024:.1f} KB, "
+                f"{tag}{page_id}: {len(assets) + 1} objects, {total_bytes / 1024:.1f} KB, "
                 f"{elapsed_s * 1000:.0f} ms, {throughput_kbps:.0f} kbps\n"
             )
 
@@ -213,15 +226,18 @@ def run_browsing_loop(target_ip: str, target_port: int, duration_minutes: int) -
                 time.sleep(step)
                 slept += step
 
-        output_queue.put("\nBrowsing simulation completed.\n")
+        output_queue.put(f"{tag}session finished.\n")
     except urllib.error.URLError as e:
-        output_queue.put(f"\nError reaching target: {e}\n")
+        output_queue.put(f"{tag}Error reaching target: {e}\n")
     except Exception as e:
-        output_queue.put(f"\nError: {e}\n")
+        output_queue.put(f"{tag}Error: {e}\n")
     finally:
         with test_lock:
-            browsing_active = False
-        output_queue.put(None)  # sentinel
+            active_sessions -= 1
+            all_done = active_sessions == 0
+        if all_done:
+            output_queue.put("\nAll browsing sessions completed.\n")
+            output_queue.put(None)  # sentinel
 
 
 @app.route("/")
@@ -263,10 +279,8 @@ def scan():
 
 @app.route("/start", methods=["POST"])
 def start():
-    global test_thread
-
     with test_lock:
-        if browsing_active:
+        if active_sessions > 0:
             return jsonify({"error": "A test is already running"}), 409
 
     data = request.json or {}
@@ -292,12 +306,19 @@ def start():
     except (ValueError, TypeError):
         return jsonify({"error": "Duration must be an integer"}), 400
 
+    try:
+        intensity = int(data.get("intensity") or DEFAULT_INTENSITY)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Intensity must be an integer"}), 400
+
     if not target_ip or not is_valid_ip(target_ip):
         return jsonify({"error": "Invalid target IP address"}), 400
     if not (1 <= target_port <= 65535):
         return jsonify({"error": "Target port must be between 1 and 65535"}), 400
     if duration_minutes < 1:
         return jsonify({"error": "Duration must be at least 1 minute"}), 400
+    if not (INTENSITY_RANGE[0] <= intensity <= INTENSITY_RANGE[1]):
+        return jsonify({"error": f"Intensity must be between {INTENSITY_RANGE[0]} and {INTENSITY_RANGE[1]}"}), 400
 
     while not output_queue.empty():
         try:
@@ -306,23 +327,21 @@ def start():
             break
 
     stop_event.clear()
-    thread = threading.Thread(
-        target=run_browsing_loop,
-        args=(target_ip, target_port, duration_minutes),
-        daemon=True
-    )
+    for session_id in range(1, intensity + 1):
+        thread = threading.Thread(
+            target=run_browsing_loop,
+            args=(session_id, target_ip, target_port, duration_minutes),
+            daemon=True
+        )
+        thread.start()
 
-    with test_lock:
-        test_thread = thread
-    thread.start()
-
-    return jsonify({"status": "started"})
+    return jsonify({"status": "started", "sessions": intensity})
 
 
 @app.route("/stop", methods=["POST"])
 def stop():
     with test_lock:
-        if browsing_active:
+        if active_sessions > 0:
             stop_event.set()
             return jsonify({"status": "stopped"})
     return jsonify({"status": "no test running"})
