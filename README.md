@@ -149,11 +149,14 @@ same as it already needs for `/opt/wifipi/www`.
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
 
-3. Test the Nginx configuration and restart Nginx:
+3. Test the Nginx configuration, then enable and (re)start Nginx:
    ```bash
    sudo nginx -t
+   sudo systemctl enable --now nginx
    sudo systemctl restart nginx
    ```
+   `enable --now` makes sure Nginx starts on boot and is running; the `restart` after it picks up the
+   config you just installed even if Nginx was already running and enabled from a prior setup.
 
 > **Note on the host name display**: every page shows the host it is served from. The three Flask apps
 > report it directly. The static landing page has no backend, so it relies on the `ssi on;` directive in
