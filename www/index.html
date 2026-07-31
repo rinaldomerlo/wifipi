@@ -155,6 +155,19 @@
             color: var(--accent-color);
             font-weight: 600;
         }
+
+        .beta-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.12);
+            border: 1px solid rgba(251, 191, 36, 0.4);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -211,7 +224,7 @@
             <a href="/wificonnect/" class="app-card">
                 <div>
                     <div class="card-header">
-                        <h2 class="card-title">WiFi Connection Manager</h2>
+                        <h2 class="card-title">WiFi Connection Manager <span class="beta-badge">Beta</span></h2>
                         <span class="path-badge">/wificonnect/</span>
                     </div>
                     <p class="card-desc">Scan for nearby networks, connect or disconnect the wireless interface, and manage saved WiFi profiles.</p>
