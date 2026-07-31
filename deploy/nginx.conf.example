@@ -39,6 +39,10 @@ server {
         return 301 /wificonnect/;
     }
 
+    location = /webbrowse {
+        return 301 /webbrowse/;
+    }
+
     # WiFi Channel & Utilization Monitor subpath (/wifimon/)
     location /wifimon/ {
         proxy_pass http://127.0.0.1:5000/;
@@ -78,5 +82,27 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Web Browsing Simulator's generated content (/webbrowse/content/) -- served directly by nginx
+    # as static files (bypassing Python) since this is just bulk random bytes. Must come before the
+    # generic /webbrowse/ proxy block below; nginx picks the longest matching prefix, so declaration
+    # order doesn't actually matter, but keeping the more specific block first reads more clearly.
+    location /webbrowse/content/ {
+        alias /opt/wifipi/web_browsing_simulator/content/;
+    }
+
+    # Web Browsing Simulator subpath (/webbrowse/)
+    location /webbrowse/ {
+        proxy_pass http://127.0.0.1:5004/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Disable buffering for real-time Server-Sent Events (SSE) page-load output streaming
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
     }
 }

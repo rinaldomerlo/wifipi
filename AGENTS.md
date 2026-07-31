@@ -18,6 +18,7 @@ Project Root Structure:
 - `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams.
 - `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
 - `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
+- `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -77,6 +78,34 @@ Project Root Structure:
     <username> ALL=(ALL) NOPASSWD: /usr/bin/nmcli
     ```
 
+### E. Web Browsing Simulator (`web_browsing_simulator`)
+- **Purpose**: Simulates realistic web-browsing traffic (bursty page-load-then-idle requests, not
+  iperf3's sustained stream) between two Pis, to see how the WiFi link behaves under everyday-shaped
+  load rather than raw throughput saturation.
+- **Content model (`content_gen.py`)**: On startup, generates a randomized corpus of 30-50 synthetic
+  "pages" to disk (`content/manifest.json`, `content/pages/<id>.html`, `content/assets/<page>/<id>.<ext>`),
+  each with 3-25 assets of varying type/size drawn from ranges that resemble real page composition (HTML,
+  CSS, JS, images, with an occasional larger "hero" image). Bytes are random and meaningless — only the
+  size/type/count distribution matters. The corpus regenerates on every process restart so test sessions
+  vary. File extensions are chosen to match declared content types because Nginx's static `alias` serving
+  infers `Content-Type` from the extension.
+- **Serving path**: In production, Nginx aliases `/webbrowse/content/` directly to the generated
+  directory, bypassing Python for the actual byte transfer (see `deploy/nginx.conf.example`). `app.py`
+  also serves the same files via `send_from_directory` at `/content/...` so `python app.py` alone works
+  in local dev with no Nginx in front.
+- **Client (browsing loop)**: Fetches the target's manifest once, then repeatedly picks a **random**
+  page (not round-robin, so traffic shape varies), fetches its HTML then its assets through a bounded
+  `ThreadPoolExecutor(max_workers=6)` (mimicking a browser's per-host connection limit), and idles a
+  random 2-8s "think time" between pages. Streams page-load summaries to the browser via SSE, matching
+  `iperf_congestion_generator`'s Start/Stop/live-output UX.
+- **Target addressing**: LAN scan (`scan_for_servers`) discovers other Pis by nmap-ing the single port
+  5004 — that only identifies which hosts have this app installed. The actual simulated fetches default
+  to **port 80** (`http://<ip>/webbrowse/content/...`, through the target's Nginx) since that's the
+  realistic "browsing the internet" path and the one that exercises Nginx's static serving; port 5004 is
+  also accepted for a no-Nginx dev-to-dev test.
+- **System Privilege Requirement**: None — only shells out to `nmap` for the optional LAN scan, same as
+  `iperf_congestion_generator`.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -108,17 +137,20 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - iPerf Generator worker: bound to `0.0.0.0:5001` (1 worker, multi-threaded for SSE streaming).
    - iPerf Server Manager worker: bound to `0.0.0.0:5002` (2 workers).
    - WiFi Connection Manager worker: bound to `0.0.0.0:5003` (2 workers).
+   - Web Browsing Simulator worker: bound to `0.0.0.0:5004` (1 worker, multi-threaded for SSE streaming).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
    - `iperf-server-manager.service`
    - `wifi-connection-manager.service`
+   - `web-browsing-simulator.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
    - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
    - Port `80` (Subpath `/iperfserver/`): Proxies to iPerf Server Manager (`127.0.0.1:5002`).
    - Port `80` (Subpath `/wificonnect/`): Proxies to WiFi Connection Manager (`127.0.0.1:5003`).
+   - Port `80` (Subpath `/webbrowse/`): Proxies to Web Browsing Simulator (`127.0.0.1:5004`) with buffering disabled for SSE, except `/webbrowse/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/web_browsing_simulator/content/`.
 
 ---
 
