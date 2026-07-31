@@ -246,6 +246,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/clientsim/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">Client Simulator <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/clientsim/</span>
+                    </div>
+                    <p class="card-desc">Simulate many independent clients behind a single WiFi association using isolated network namespaces, NAT'd out one radio, with churn to mimic devices joining and leaving.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <footer>
@@ -273,7 +286,8 @@
                 '/iperfserver/api/hostname',
                 '/iperf/api/hostname',
                 '/wificonnect/api/hostname',
-                '/webbrowse/api/hostname'
+                '/webbrowse/api/hostname',
+                '/clientsim/api/hostname'
             ];
 
             (function tryNext(i) {

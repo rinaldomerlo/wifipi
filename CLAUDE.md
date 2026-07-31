@@ -15,6 +15,8 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `iperf_congestion_generator/` | Flask app — starts/stops `iperf3` client streams, streams output over SSE. Port 5001, proxied at `/iperf/`. |
 | `iperf_server_manager/` | Flask app — discovers and controls `iperf3` server daemons and systemd units. Port 5002, proxied at `/iperfserver/`. |
 | `wifi_connection_manager/` | Flask app — scans/connects/disconnects WiFi via `nmcli` (NetworkManager). Port 5003, proxied at `/wificonnect/`. |
+| `web_browsing_simulator/` | Flask app — simulates bursty web-browsing traffic against another Pi's synthetic page corpus. Port 5004, proxied at `/webbrowse/`. |
+| `client_simulator/` | Flask app — simulates many clients behind one WiFi association via netns/veth/bridge NAT, with churn. Port 5005, proxied at `/clientsim/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -35,6 +37,8 @@ cd wifi_utilization_monitor && ../.venv/bin/python app.py        # :5000
 cd iperf_congestion_generator && ../.venv/bin/python app.py      # :5001
 cd iperf_server_manager && ../.venv/bin/python app.py            # :5002
 cd wifi_connection_manager && ../.venv/bin/python app.py         # :5003
+cd web_browsing_simulator && ../.venv/bin/python app.py          # :5004
+cd client_simulator && ../.venv/bin/python app.py                # :5005
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -55,6 +59,11 @@ Three apps need passwordless sudo in production (rules documented in `README.md`
 `iw` for the WiFi monitor, `systemctl ... iperf3*` for the server manager, and `nmcli` for the connection
 manager. The connection manager also requires NetworkManager to be the active network backend — it does
 not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
+
+`client_simulator` needs root for `ip`/`iptables`/`sysctl` (network namespaces, veth, NAT); its systemd
+unit runs as `root` by default so no sudoers entry is needed unless it's reconfigured to run as a non-root
+user. It detects at runtime whether real namespaces are usable (`detect_mode()` in `app.py`) and falls
+back to a plain-thread/urllib simulation otherwise — this is what makes it work on macOS in dev.
 
 ---
 

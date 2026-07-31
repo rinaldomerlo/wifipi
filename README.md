@@ -16,7 +16,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A web interface to scan for nearby WiFi networks, connect or disconnect the wireless interface, and manage saved network profiles via NetworkManager (`nmcli`).
 5. **Web Browsing Simulator (`web_browsing_simulator`)**  
    A browser-based tool that simulates realistic, bursty web-browsing traffic (random page loads with think-time between them) against another Pi's randomized synthetic page corpus, complementing the iperf3 apps' sustained-throughput tests.
-6. **Default Landing Webpage (`www`)**  
+6. **Client Simulator (`client_simulator`)**  
+   A browser-based tool that simulates many independent clients behind a single WiFi association: each simulated client gets its own Linux network namespace connected via a veth pair to an internal bridge that is NAT'd out the real wlan0/eth0 interface, so the router only ever sees the Pi's one station while the Pi's own kernel still does real per-client routing/ARP/conntrack work. A churn engine periodically retires and recreates a fraction of clients to simulate devices joining and leaving. Falls back to a lightweight thread-based simulation when real network namespaces aren't available (e.g. macOS development).
+7. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -31,7 +33,7 @@ Update your system and install Nginx, iperf3, nmap, NetworkManager, python3-pip,
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y nginx iperf3 nmap network-manager python3-pip python3-venv
+sudo apt-get install -y nginx iperf3 nmap network-manager python3-pip python3-venv iproute2 iptables dnsutils curl
 ```
 
 *Note*: Raspberry Pi OS Bookworm (and later) ships with NetworkManager as the default network backend, so `nmcli` is likely already present. Older images (Bullseye and earlier) use `dhcpcd` + `wpa_supplicant` instead — the WiFi Connection Manager app requires NetworkManager and will not work with that older stack without migrating to it first.
@@ -62,6 +64,7 @@ The platform applications require administrative privileges for specific system-
 1. **WiFi Utilization Monitor**: Executes `sudo iw dev <interface> scan` to collect live wireless scan data.
 2. **iPerf3 Server Manager**: Executes `sudo systemctl [start|stop|restart]` to manage `iperf3` server systemd service units.
 3. **WiFi Connection Manager**: Executes `sudo nmcli ...` to scan, connect, disconnect, and manage saved WiFi profiles via NetworkManager.
+4. **Client Simulator**: Executes `sudo ip ...`, `sudo iptables ...`, and `sudo sysctl ...` to create/destroy network namespaces, veth pairs, and the NAT bridge. Only needed if the service runs as a non-root user — the unit file runs as `root` by default (see Step 4 below), in which case no sudoers entry is required. This app also expects `curl`, `dig` (package `dnsutils`), and `iproute2` (for `ip`) to be installed.
 
 The **Web Browsing Simulator** needs none of this — it only shells out to `nmap` for its optional LAN scan, same as the iPerf3 Congestion Generator.
 
@@ -76,8 +79,9 @@ To allow the app user to execute these commands without a password prompt:
    $USER ALL=(ALL) NOPASSWD: /usr/sbin/iw
    $USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start iperf3*, /usr/bin/systemctl stop iperf3*, /usr/bin/systemctl restart iperf3*, /usr/bin/systemctl is-active iperf3*, /bin/systemctl start iperf3*, /bin/systemctl stop iperf3*, /bin/systemctl restart iperf3*, /bin/systemctl is-active iperf3*
    $USER ALL=(ALL) NOPASSWD: /usr/bin/nmcli
+   $USER ALL=(ALL) NOPASSWD: /usr/sbin/ip, /usr/sbin/iptables, /usr/sbin/sysctl
    ```
-   *(Verify absolute binary paths on your distribution using `which iw`, `which systemctl`, and `which nmcli`)*
+   *(Verify absolute binary paths on your distribution using `which iw`, `which systemctl`, `which nmcli`, `which ip`, `which iptables`, and `which sysctl`. The last rule is only needed if Client Simulator runs as a non-root user; it runs as `root` by default.)*
 
 ### Step 4: Set Up Systemd Services
 
@@ -89,6 +93,7 @@ sudo cp deploy/iperf-generator.service /etc/systemd/system/
 sudo cp deploy/iperf-server-manager.service /etc/systemd/system/
 sudo cp deploy/wifi-connection-manager.service /etc/systemd/system/
 sudo cp deploy/web-browsing-simulator.service /etc/systemd/system/
+sudo cp deploy/client-simulator.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -102,6 +107,7 @@ sudo systemctl enable --now iperf-generator
 sudo systemctl enable --now iperf-server-manager
 sudo systemctl enable --now wifi-connection-manager
 sudo systemctl enable --now web-browsing-simulator
+sudo systemctl enable --now client-simulator
 ```
 
 Verify service status:
@@ -111,6 +117,7 @@ sudo systemctl status iperf-generator
 sudo systemctl status iperf-server-manager
 sudo systemctl status wifi-connection-manager
 sudo systemctl status web-browsing-simulator
+sudo systemctl status client-simulator
 ```
 
 #### Multi-Port iPerf3 Server Services (Optional)
@@ -129,7 +136,7 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, and `/webbrowse/` to the respective backend Flask apps.
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, and `/clientsim/` to the respective backend Flask apps.
 
 For `/webbrowse/` specifically, Nginx also serves the app's generated synthetic content directly as
 static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
@@ -174,3 +181,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **iPerf3 Server Manager**: Open `http://<pi-ip>/iperfserver/` (Subpath `/iperfserver/` reverse-proxied to Gunicorn on port 5002)
 - **WiFi Connection Manager**: Open `http://<pi-ip>/wificonnect/` (Subpath `/wificonnect/` reverse-proxied to Gunicorn on port 5003)
 - **Web Browsing Simulator**: Open `http://<pi-ip>/webbrowse/` (Subpath `/webbrowse/` reverse-proxied to Gunicorn on port 5004, with `/webbrowse/content/` served directly by Nginx)
+- **Client Simulator**: Open `http://<pi-ip>/clientsim/` (Subpath `/clientsim/` reverse-proxied to Gunicorn on port 5005)

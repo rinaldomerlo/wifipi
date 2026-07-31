@@ -19,6 +19,7 @@ Project Root Structure:
 - `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
 - `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
 - `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
+- `client_simulator/` — Simulates many independent clients behind a single WiFi association using isolated Linux network namespaces NAT'd out one radio, with a churn engine cycling client identities.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -106,6 +107,42 @@ Project Root Structure:
 - **System Privilege Requirement**: None — only shells out to `nmap` for the optional LAN scan, same as
   `iperf_congestion_generator`.
 
+### F. Client Simulator (`client_simulator`)
+- **Purpose**: Simulates many independent clients behind a single WiFi association, per the "NAT mode"
+  design in the original architecture doc for this feature — one physical WiFi association carrying
+  hundreds of logically separate client identities, rather than macvlan's attempt to give each client its
+  own MAC on the radio (which doesn't work over 802.11 STA associations; see the doc history for why).
+- **Networking model**: Each simulated client gets its own Linux network namespace (`wfsim-<id>`),
+  connected via a veth pair to an internal bridge (`wfsim-br0`, subnet `10.200.0.0/16`) that is NAT'd
+  (`iptables -t nat -A POSTROUTING ... -j MASQUERADE`) out the real `wlan0`/`eth0` interface. The physical
+  interface is **never** added to the bridge itself — only veth host-ends are — so this is ordinary L3 NAT
+  through the one WiFi station (same mechanism a home router uses for its whole LAN), not an attempt to
+  bridge multiple MACs onto the radio. The router only ever sees the Pi's single station/IP; the Pi's own
+  kernel still does real per-client routing/ARP/conntrack work.
+- **Traffic generation (Tier 1 only)**: each client's worker thread alternates `curl` (HTTP, via
+  `ip netns exec <ns> curl ...`) and `dig` (DNS, via `ip netns exec <ns> dig @<dns_server> <name>`) with a
+  randomized 2-8s think-time between requests, mirroring `web_browsing_simulator`'s bursty-not-sustained
+  pattern. Headless-browser (Playwright) tiers from the original design doc were deliberately left out —
+  they'd add a third-party dependency, which this repo avoids without asking first.
+- **Churn engine**: every 60s, retires and replaces `churn_rate_percent` of active clients (namespace
+  delete + recreate under a fresh id/IP), keeping the total count steady while cycling identities — "N
+  clients disappear, N reappear" — to exercise the Pi's conntrack/ARP tables the way real devices
+  sleeping/roaming would.
+- **Environment split**: `detect_mode()` probes `platform.system() == "Linux"`, `ip` on `PATH`, and
+  `sudo -n ip netns list` (passwordless sudo) to decide between real `netns` mode and a `simulated`
+  fallback that runs the identical client/churn lifecycle with plain threads and `urllib`/`socket` instead
+  of real namespaces — this is what lets the app run on macOS during development, and it's also the
+  automatic fallback in production if bridge/NAT setup fails partway through.
+- **System Privilege Requirement**: Executes `sudo ip ...`, `sudo iptables ...`, and `sudo sysctl -w
+  net.ipv4.ip_forward=1` to create/destroy namespaces, veth pairs, and the NAT bridge. The systemd unit
+  runs as `root` by default (see `deploy/client-simulator.service`), which already satisfies this; a
+  sudoers rule is only needed if it's reconfigured to run as a non-root user:
+  ```text
+  <username> ALL=(ALL) NOPASSWD: /usr/sbin/ip, /usr/sbin/iptables, /usr/sbin/sysctl
+  ```
+  Also expects `curl` and `dig` (package `dnsutils`) to be installed, since traffic generation shells out
+  to them inside each namespace rather than using Python's HTTP/DNS stack directly.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -138,12 +175,14 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - iPerf Server Manager worker: bound to `0.0.0.0:5002` (2 workers).
    - WiFi Connection Manager worker: bound to `0.0.0.0:5003` (2 workers).
    - Web Browsing Simulator worker: bound to `0.0.0.0:5004` (1 worker, multi-threaded for SSE streaming).
+   - Client Simulator worker: bound to `0.0.0.0:5005` (1 worker, multi-threaded for SSE streaming; runs as root by default since it needs `ip`/`iptables`/`sysctl`).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
    - `iperf-server-manager.service`
    - `wifi-connection-manager.service`
    - `web-browsing-simulator.service`
+   - `client-simulator.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
@@ -151,6 +190,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/iperfserver/`): Proxies to iPerf Server Manager (`127.0.0.1:5002`).
    - Port `80` (Subpath `/wificonnect/`): Proxies to WiFi Connection Manager (`127.0.0.1:5003`).
    - Port `80` (Subpath `/webbrowse/`): Proxies to Web Browsing Simulator (`127.0.0.1:5004`) with buffering disabled for SSE, except `/webbrowse/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/web_browsing_simulator/content/`.
+   - Port `80` (Subpath `/clientsim/`): Proxies to Client Simulator (`127.0.0.1:5005`) with buffering disabled for SSE.
 
 ---
 
