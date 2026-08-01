@@ -21,6 +21,7 @@ Project Root Structure:
 - `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
 - `client_simulator/` — Simulates many independent clients behind a single WiFi association using isolated Linux network namespaces NAT'd out one radio, with a churn engine cycling client identities.
 - `network_device_scanner/` — ARP-based LAN device inventory (IP/MAC/vendor/hostname) via a privileged `nmap -sn` sweep of a chosen Bind Interface's subnet.
+- `roaming_monitor/` — Live association-event timeline from `iw event`, timing roams between BSSIDs and decoding 802.11 reason codes.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -182,6 +183,35 @@ Project Root Structure:
   <username> ALL=(ALL) NOPASSWD: /usr/bin/nmap
   ```
 
+### H. WiFi Roaming Monitor (`roaming_monitor`)
+- **Purpose**: Builds a live timeline of association events for one wireless interface, so roams between
+  BSSIDs can be *timed* and disconnects *explained*. Distinct from the other wireless apps:
+  `wifi_utilization_monitor` scans neighbouring BSSes, `wifi_connection_manager` controls the connection
+  — this one only observes what the kernel/supplicant actually did, over time.
+- **Test context**: the Pi sits static in an RF chamber with a **variable attenuator**, which is what
+  makes roaming testable at all — fading one AP down and another up forces the transitions this app
+  measures. Without programmable attenuation (or multiple switchable APs) a stationary station rarely
+  roams and the roam statistics stay empty; the disconnect/reason-code timeline is still useful there.
+- **Event source**: follows `sudo -n iw event -t` in a background thread. stdout is attached to a **pty**
+  rather than a pipe, because `iw` block-buffers on a pipe and would deliver events in bursts long after
+  they occurred — fatal when timing sub-second roams. `stdbuf -oL` is not an option here: `sudo` resets
+  the environment `stdbuf` relies on, and the sudoers rule only grants `iw` anyway.
+- **Timestamps**: `iw event -t` stamps events with kernel seconds-since-boot, and those are used for all
+  durations rather than the time Python read the line — a burst arriving in one `read()` would otherwise
+  look simultaneous. `_boot_time_offset()` reads `/proc/uptime` once to map them to wall-clock for display.
+- **Roam timing (`process_event`)**: the clock starts at the first sign of a transition — a
+  deauth/disassoc/disconnect, *or* an auth/assoc involving anything other than the current BSSID, since
+  802.11r fast transitions skip the disconnect entirely — and stops at the following `connected to`. A
+  connect to a *different* BSSID is a `roam`; to the *same* one, a `reconnect`; with no prior BSSID, an
+  `initial` connect. Because `iw` prints auth/assoc frames in both directions, `parse_iw_event()` keeps
+  **both** MACs (`macs`) and the caller asks whether the current BSSID is among them, rather than
+  assuming which side is the AP.
+- **Reason/status decoding**: `REASON_CODES` and `STATUS_CODES` map 802.11 numbers to text — most of the
+  diagnostic value in the timeline, since "reason 15" alone means nothing but "4-Way Handshake timeout"
+  points straight at a PSK/key-exchange problem. Unknown codes are labelled, never dropped.
+- **System Privilege Requirement**: Executes `sudo iw event -t`, covered by the **existing** `iw` sudoers
+  rule already required by `wifi_utilization_monitor` — no new privilege to configure.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -216,6 +246,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Web Browsing Simulator worker: bound to `0.0.0.0:5004` (1 worker, multi-threaded for SSE streaming).
    - Client Simulator worker: bound to `0.0.0.0:5005` (1 worker, multi-threaded for SSE streaming; runs as root by default since it needs `ip`/`iptables`/`sysctl`).
    - Network Device Scanner worker: bound to `0.0.0.0:5006` (1 worker; `sudo -n nmap` needs a sudoers rule since this app runs as the app user, not root).
+   - WiFi Roaming Monitor worker: bound to `0.0.0.0:5007` (1 worker, multi-threaded for SSE streaming; reuses the existing `iw` sudoers rule).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
@@ -224,6 +255,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `web-browsing-simulator.service`
    - `client-simulator.service`
    - `network-device-scanner.service`
+   - `roaming-monitor.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
@@ -233,6 +265,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/webbrowse/`): Proxies to Web Browsing Simulator (`127.0.0.1:5004`) with buffering disabled for SSE, except `/webbrowse/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/web_browsing_simulator/content/`.
    - Port `80` (Subpath `/clientsim/`): Proxies to Client Simulator (`127.0.0.1:5005`) with buffering disabled for SSE.
    - Port `80` (Subpath `/devices/`): Proxies to Network Device Scanner (`127.0.0.1:5006`).
+   - Port `80` (Subpath `/roaming/`): Proxies to WiFi Roaming Monitor (`127.0.0.1:5007`) with buffering disabled for SSE.
 
 ---
 

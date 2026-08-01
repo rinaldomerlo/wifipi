@@ -18,6 +18,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `web_browsing_simulator/` | Flask app — simulates bursty web-browsing traffic against another Pi's synthetic page corpus. Port 5004, proxied at `/webbrowse/`. |
 | `client_simulator/` | Flask app — simulates many clients behind one WiFi association via netns/veth/bridge NAT, with churn. Port 5005, proxied at `/clientsim/`. |
 | `network_device_scanner/` | Flask app — ARP-based LAN device inventory (IP/MAC/vendor) via `nmap -sn` on a chosen Bind Interface. Port 5006, proxied at `/devices/`. |
+| `roaming_monitor/` | Flask app — live association-event timeline from `iw event`, with roam timing and decoded 802.11 reason codes. Port 5007, proxied at `/roaming/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -41,6 +42,7 @@ cd wifi_connection_manager && ../.venv/bin/python app.py         # :5003
 cd web_browsing_simulator && ../.venv/bin/python app.py          # :5004
 cd client_simulator && ../.venv/bin/python app.py                # :5005
 cd network_device_scanner && ../.venv/bin/python app.py          # :5006
+cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -72,6 +74,12 @@ back to a plain-thread/urllib simulation otherwise — this is what makes it wor
 error instead of hanging a request) for its ARP-based host sweep. Off-Linux or without the sudoers rule
 configured, the scan route returns a JSON error rather than crashing — this is what makes it degrade
 gracefully on macOS in dev.
+
+`roaming_monitor` follows `sudo -n iw event -t` in a background thread; it reuses the WiFi monitor's
+existing `iw` sudoers rule, so no new privilege is needed. Its start route refuses up front on non-Linux
+or when `iw` is absent, so macOS dev gets a clear error rather than a hung thread. Note it attaches the
+subprocess to a **pty** rather than a pipe — `iw` block-buffers when it sees a pipe, which would batch
+events instead of streaming them; `stdbuf` isn't usable here because `sudo` resets its environment.
 
 ---
 

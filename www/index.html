@@ -262,6 +262,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/roaming/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">WiFi Roaming Monitor <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/roaming/</span>
+                    </div>
+                    <p class="card-desc">Live timeline of association events, timing roams between BSSIDs and decoding 802.11 reason codes so disconnects explain themselves.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <hr class="section-divider">
@@ -322,7 +335,8 @@
                 '/wificonnect/api/hostname',
                 '/webbrowse/api/hostname',
                 '/clientsim/api/hostname',
-                '/devices/api/hostname'
+                '/devices/api/hostname',
+                '/roaming/api/hostname'
             ];
 
             (function tryNext(i) {

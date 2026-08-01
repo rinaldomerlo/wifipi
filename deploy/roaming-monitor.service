@@ -1,0 +1,15 @@
+[Unit]
+Description=WiFi Roaming Monitor (Flask / Gunicorn)
+After=network.target
+
+[Service]
+# Uncomment and set User/Group if you wish to run as a specific non-root user (e.g., User=jenkins or User=pi).
+# If omitted, systemd runs the service as root.
+# User=pi
+# Group=pi
+WorkingDirectory=/opt/wifipi/roaming_monitor
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 0.0.0.0:5007 --workers 1 --threads 4 --timeout 120 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

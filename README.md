@@ -20,7 +20,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based tool that simulates many independent clients behind a single WiFi association: each simulated client gets its own Linux network namespace connected via a veth pair to an internal bridge that is NAT'd out the real wlan0/eth0 interface, so the router only ever sees the Pi's one station while the Pi's own kernel still does real per-client routing/ARP/conntrack work. A churn engine periodically retires and recreates a fraction of clients to simulate devices joining and leaving. Falls back to a lightweight thread-based simulation when real network namespaces aren't available (e.g. macOS development).
 7. **Network Device Scanner (`network_device_scanner`)**  
    A browser-based tool that inventories every device currently reachable on the LAN behind a chosen Bind Interface — IP address, MAC address, vendor, and hostname — via a privileged ARP-based `nmap -sn` sweep, so it finds devices even when every port they expose is closed or firewalled.
-8. **Default Landing Webpage (`www`)**  
+8. **WiFi Roaming Monitor (`roaming_monitor`)**  
+   A browser-based live timeline of association events (`iw event`) for a chosen wireless interface: authentication, association, connection, deauthentication and disconnection, each timestamped from the kernel and streamed to the browser. Measures how long a roam between two BSSIDs actually took — including 802.11r fast transitions that skip the disconnect entirely — and decodes 802.11 reason codes so a drop reports "4-Way Handshake timeout" rather than "reason 15". Intended for chamber testing where a variable attenuator is used to force transitions between APs.
+9. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -63,7 +65,7 @@ pip install -r requirements.txt
 ### Step 3: Configure Passwordless Sudo (WiFi Monitor, iPerf Server Manager, WiFi Connection Manager & Network Device Scanner)
 
 The platform applications require administrative privileges for specific system-level commands when executed under a non-root user (e.g. `$USER`, `jenkins`, or `pi`):
-1. **WiFi Utilization Monitor**: Executes `sudo iw dev <interface> scan` to collect live wireless scan data.
+1. **WiFi Utilization Monitor** (and **WiFi Roaming Monitor**): Executes `sudo iw dev <interface> scan` to collect live wireless scan data. The Roaming Monitor uses the same `iw` rule to run `sudo iw event -t`, so it needs no additional sudoers entry.
 2. **iPerf3 Server Manager**: Executes `sudo systemctl [start|stop|restart]` to manage `iperf3` server systemd service units.
 3. **WiFi Connection Manager**: Executes `sudo nmcli ...` to scan, connect, disconnect, and manage saved WiFi profiles via NetworkManager.
 4. **Client Simulator**: Executes `sudo ip ...`, `sudo iptables ...`, and `sudo sysctl ...` to create/destroy network namespaces, veth pairs, and the NAT bridge. Only needed if the service runs as a non-root user — the unit file runs as `root` by default (see Step 4 below), in which case no sudoers entry is required. This app also expects `curl`, `dig` (package `dnsutils`), and `iproute2` (for `ip`) to be installed.
@@ -99,6 +101,7 @@ sudo cp deploy/wifi-connection-manager.service /etc/systemd/system/
 sudo cp deploy/web-browsing-simulator.service /etc/systemd/system/
 sudo cp deploy/client-simulator.service /etc/systemd/system/
 sudo cp deploy/network-device-scanner.service /etc/systemd/system/
+sudo cp deploy/roaming-monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -114,6 +117,7 @@ sudo systemctl enable --now wifi-connection-manager
 sudo systemctl enable --now web-browsing-simulator
 sudo systemctl enable --now client-simulator
 sudo systemctl enable --now network-device-scanner
+sudo systemctl enable --now roaming-monitor
 ```
 
 Verify service status:
@@ -125,6 +129,7 @@ sudo systemctl status wifi-connection-manager
 sudo systemctl status web-browsing-simulator
 sudo systemctl status client-simulator
 sudo systemctl status network-device-scanner
+sudo systemctl status roaming-monitor
 ```
 
 #### Multi-Port iPerf3 Server Services (Optional)
@@ -143,7 +148,7 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, and `/devices/` to the respective backend Flask apps.
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, and `/roaming/` to the respective backend Flask apps.
 
 For `/webbrowse/` specifically, Nginx also serves the app's generated synthetic content directly as
 static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
@@ -190,3 +195,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **Web Browsing Simulator**: Open `http://<pi-ip>/webbrowse/` (Subpath `/webbrowse/` reverse-proxied to Gunicorn on port 5004, with `/webbrowse/content/` served directly by Nginx)
 - **Client Simulator**: Open `http://<pi-ip>/clientsim/` (Subpath `/clientsim/` reverse-proxied to Gunicorn on port 5005)
 - **Network Device Scanner**: Open `http://<pi-ip>/devices/` (Subpath `/devices/` reverse-proxied to Gunicorn on port 5006)
+- **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)

@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /roaming to /roaming/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Roaming Monitor - WiFiPi</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-glow: 0 0 15px rgba(0, 210, 255, 0.25);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            padding: 1.5rem;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i { color: var(--color-blue); }
+        .host-badge strong { color: var(--text-primary); font-weight: 600; }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover { border-color: var(--glass-border-hover); }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+
+        label i { margin-right: 4px; }
+
+        select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.95rem;
+            font-weight: 500;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        select option {
+            background-color: var(--bg-light);
+            color: var(--text-primary);
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .controls-row > div:first-child { min-width: 220px; }
+
+        .hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.75rem;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.7rem 1.4rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        #btn-start {
+            background: linear-gradient(135deg, #00e676 0%, #00c853 100%);
+            color: #08090f;
+            box-shadow: 0 4px 15px rgba(0, 230, 118, 0.25);
+        }
+
+        #btn-start:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 230, 118, 0.4);
+        }
+
+        #btn-stop {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(255, 59, 116, 0.25);
+        }
+
+        #btn-stop:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 59, 116, 0.4);
+        }
+
+        #status-msg {
+            font-size: 0.85rem;
+            color: var(--color-orange);
+            margin-top: 0.75rem;
+            min-height: 1.2em;
+            font-weight: 500;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .stat-tile {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 1rem 1.1rem;
+        }
+
+        .stat-tile .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.35rem;
+        }
+
+        .stat-tile .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-tile.wide .stat-value {
+            font-size: 0.95rem;
+            font-family: monospace;
+            color: var(--color-blue);
+            padding-top: 0.35rem;
+        }
+
+        .stat-tile.roam .stat-value { color: var(--color-blue); }
+
+        #timeline {
+            background: rgba(8, 9, 15, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            height: 420px;
+            overflow-y: auto;
+        }
+
+        .ev {
+            display: flex;
+            gap: 0.9rem;
+            padding: 0.15rem 0;
+            align-items: baseline;
+        }
+
+        .ev-time {
+            color: var(--text-muted);
+            white-space: nowrap;
+            font-size: 0.8rem;
+        }
+
+        .ev-body { word-break: break-word; }
+
+        .ev-connected .ev-body { color: var(--color-green); }
+        .ev-disconnected .ev-body,
+        .ev-deauth .ev-body,
+        .ev-disassoc .ev-body,
+        .ev-error .ev-body { color: var(--color-pink); }
+        .ev-auth .ev-body, .ev-assoc .ev-body { color: var(--color-blue); }
+        .ev-scan .ev-body { color: var(--text-secondary); }
+        .ev-cqm .ev-body { color: var(--color-orange); }
+        .ev-other .ev-body { color: var(--text-secondary); }
+
+        .ev-reason {
+            color: var(--color-orange);
+            font-size: 0.8rem;
+            padding-left: 0.5rem;
+        }
+
+        .roam-callout {
+            color: var(--color-purple);
+            font-weight: 600;
+            padding: 0.1rem 0 0.4rem 6.2rem;
+            font-size: 0.82rem;
+        }
+
+        .placeholder { color: var(--text-muted); }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(8, 9, 15, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-tower-broadcast logo-icon"></i>
+                <div class="logo-text">
+                    <h1>Roaming <span>Monitor</span></h1>
+                    <span class="subtitle">Association Event Timeline &amp; Roam Timing</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <div class="glass-card">
+            <div class="controls-row">
+                <div>
+                    <label for="interface"><i class="fa-solid fa-wifi"></i> Wireless Interface</label>
+                    <select id="interface">
+                        <option value="">Detecting…</option>
+                    </select>
+                </div>
+                <button id="btn-start" class="btn" onclick="startMonitor()"><i class="fa-solid fa-play"></i> Start Monitoring</button>
+                <button id="btn-stop" class="btn" onclick="stopMonitor()" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+            </div>
+            <div class="hint">
+                Follows <code>iw event</code> for this interface. A roam is timed from the first sign of a
+                transition (deauth, disconnect, or an auth aimed at a different BSSID) through to the
+                following connect — so both full re-associations and 802.11r fast transitions are captured.
+            </div>
+            <div id="status-msg"></div>
+        </div>
+
+        <div class="glass-card">
+            <div class="stats-grid">
+                <div class="stat-tile">
+                    <div class="stat-label">Status</div>
+                    <div class="stat-value" id="stat-status">Idle</div>
+                </div>
+                <div class="stat-tile wide">
+                    <div class="stat-label">Current BSSID</div>
+                    <div class="stat-value" id="stat-bssid">—</div>
+                </div>
+                <div class="stat-tile roam">
+                    <div class="stat-label">Roams</div>
+                    <div class="stat-value" id="stat-roams">0</div>
+                </div>
+                <div class="stat-tile roam">
+                    <div class="stat-label">Last Roam</div>
+                    <div class="stat-value" id="stat-last-roam">—</div>
+                </div>
+                <div class="stat-tile roam">
+                    <div class="stat-label">Avg Roam</div>
+                    <div class="stat-value" id="stat-avg-roam">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Disconnects</div>
+                    <div class="stat-value" id="stat-disconnects">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <label style="margin-bottom: 0.75rem;"><i class="fa-solid fa-timeline"></i> Association Event Timeline</label>
+            <div id="timeline"><span class="placeholder">Events will appear here once monitoring starts…</span></div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let statusTimer = null;
+        let timelineEmpty = true;
+
+        function setStatus(msg, color) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.style.color = color || 'var(--color-orange)';
+        }
+
+        function setRunning(running) {
+            document.getElementById('btn-start').disabled = running;
+            document.getElementById('btn-stop').disabled = !running;
+        }
+
+        function fmtMs(v) {
+            return (v === null || v === undefined) ? '—' : v + ' ms';
+        }
+
+        async function loadInterfaces() {
+            const sel = document.getElementById('interface');
+            try {
+                const res = await fetch('api/interfaces', { cache: 'no-store' });
+                const data = await res.json();
+                const list = data.interfaces || [];
+                if (!list.length) {
+                    sel.innerHTML = '<option value="">No wireless interface found</option>';
+                    return;
+                }
+                sel.innerHTML = list.map(i => `<option value="${i}">${i}</option>`).join('');
+            } catch (e) {
+                sel.innerHTML = '<option value="">Failed to detect interfaces</option>';
+            }
+        }
+
+        function addEvent(ev) {
+            const tl = document.getElementById('timeline');
+            if (timelineEmpty) {
+                tl.innerHTML = '';
+                timelineEmpty = false;
+            }
+
+            const row = document.createElement('div');
+            row.className = 'ev ev-' + (ev.type || 'other');
+
+            let body = ev.detail || ev.raw || '';
+            if (ev.status_text && ev.status_code !== 0) {
+                body += `  [status ${ev.status_code}: ${ev.status_text}]`;
+            }
+            row.innerHTML = `<span class="ev-time">${ev.time || ''}</span><span class="ev-body">${escapeHtml(body)}</span>`;
+            tl.appendChild(row);
+
+            if (ev.reason_code !== null && ev.reason_code !== undefined && ev.reason_text) {
+                const reason = document.createElement('div');
+                reason.className = 'roam-callout ev-reason';
+                reason.textContent = `└─ reason ${ev.reason_code}: ${ev.reason_text}`;
+                tl.appendChild(reason);
+            }
+
+            if (ev.transition === 'roam') {
+                const callout = document.createElement('div');
+                callout.className = 'roam-callout';
+                const dur = ev.duration_ms !== undefined ? ` in ${ev.duration_ms} ms` : '';
+                callout.textContent = `└─ roamed from ${ev.from_bssid}${dur}`;
+                tl.appendChild(callout);
+            } else if (ev.transition === 'reconnect' && ev.duration_ms !== undefined) {
+                const callout = document.createElement('div');
+                callout.className = 'roam-callout';
+                callout.textContent = `└─ reconnected to same BSSID in ${ev.duration_ms} ms`;
+                tl.appendChild(callout);
+            }
+
+            tl.scrollTop = tl.scrollHeight;
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function applyStats(data) {
+            document.getElementById('stat-status').textContent =
+                data.running ? (data.connected ? 'Connected' : 'Watching') : 'Idle';
+            document.getElementById('stat-bssid').textContent = data.current_bssid || '—';
+            document.getElementById('stat-roams').textContent = data.roams ?? 0;
+            document.getElementById('stat-last-roam').textContent = fmtMs(data.last_roam_ms);
+            document.getElementById('stat-avg-roam').textContent = fmtMs(data.avg_roam_ms);
+            document.getElementById('stat-disconnects').textContent = data.disconnects ?? 0;
+        }
+
+        async function pollStatus() {
+            try {
+                const res = await fetch('api/status', { cache: 'no-store' });
+                const data = await res.json();
+                applyStats(data);
+                if (!data.running) {
+                    setRunning(false);
+                    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+                    if (data.error) setStatus('Stopped: ' + data.error, 'var(--color-pink)');
+                }
+            } catch (e) { /* ignore transient poll failures */ }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('api/events', { cache: 'no-store' });
+                const data = await res.json();
+                applyStats(data);
+                (data.events || []).forEach(addEvent);
+                if (data.running) {
+                    setRunning(true);
+                    startStream();
+                    if (!statusTimer) statusTimer = setInterval(pollStatus, 2000);
+                    setStatus('Monitoring ' + (data.interface || ''), 'var(--color-green)');
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        async function startMonitor() {
+            const iface = document.getElementById('interface').value;
+            document.getElementById('timeline').innerHTML = '';
+            timelineEmpty = true;
+            setRunning(true);
+            setStatus('Starting…', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('api/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interface: iface })
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus('Error: ' + data.error, 'var(--color-pink)');
+                    setRunning(false);
+                    return;
+                }
+                setStatus('Monitoring ' + data.interface, 'var(--color-green)');
+            } catch (e) {
+                setStatus('Failed to start: ' + e, 'var(--color-pink)');
+                setRunning(false);
+                return;
+            }
+
+            startStream();
+            if (statusTimer) clearInterval(statusTimer);
+            statusTimer = setInterval(pollStatus, 2000);
+            pollStatus();
+        }
+
+        function startStream() {
+            if (eventSource) eventSource.close();
+            eventSource = new EventSource('stream');
+            eventSource.onmessage = (e) => {
+                if (!e.data || e.data === '{}') return; // keepalive
+                try {
+                    addEvent(JSON.parse(e.data));
+                } catch (err) { /* ignore malformed frame */ }
+            };
+            eventSource.onerror = () => {
+                eventSource.close();
+                eventSource = null;
+                setRunning(false);
+                pollStatus();
+            };
+        }
+
+        async function stopMonitor() {
+            await fetch('api/stop', { method: 'POST' });
+            if (eventSource) { eventSource.close(); eventSource = null; }
+            setRunning(false);
+            setStatus('Monitoring stopped.', 'var(--color-orange)');
+        }
+
+        loadInterfaces().then(loadHistory);
+    </script>
+</body>
+</html>
