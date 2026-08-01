@@ -33,7 +33,7 @@ def reset_module_state():
     rm_app_module._roam_durations.clear()
     rm_app_module.state.update({
         "running": False, "interface": None, "connected": False,
-        "current_bssid": None, "started_at": None, "error": None,
+        "current_bssid": None, "ssid": None, "started_at": None, "error": None,
     })
     rm_app_module.stats.update({
         "roams": 0, "reconnects": 0, "disconnects": 0,
@@ -128,6 +128,89 @@ class TestRoamingMonitorRoutes(unittest.TestCase):
         self.assertEqual(response.get_json()['interface'], 'wlan0')
         mock_thread.assert_called_once()
         self.assertEqual(mock_thread.call_args[1]['args'], ('wlan0',))
+
+
+IW_LINK_CONNECTED = """Connected to aa:bb:cc:dd:ee:01 (on wlan0)
+\tSSID: ChamberAP
+\tfreq: 5180
+\tsignal: -47 dBm
+\ttx bitrate: 2882.9 MBit/s
+"""
+
+
+class TestCurrentLinkSeeding(unittest.TestCase):
+    """
+    `iw event` only reports transitions, so a session started while already associated
+    must seed the BSSID from `iw dev <iface> link` -- otherwise the first roam is
+    misread as an initial connect and goes uncounted.
+    """
+
+    def setUp(self):
+        rm_app.config['TESTING'] = True
+        self.client = rm_app.test_client()
+        reset_module_state()
+
+    @patch('roaming_monitor.app.subprocess.check_output')
+    def test_parses_current_association(self, mock_check):
+        mock_check.return_value = IW_LINK_CONNECTED.encode()
+        link = rm_app_module.get_current_link('wlan0')
+        self.assertTrue(link['connected'])
+        self.assertEqual(link['bssid'], 'aa:bb:cc:dd:ee:01')
+        self.assertEqual(link['ssid'], 'ChamberAP')
+
+    @patch('roaming_monitor.app.subprocess.check_output')
+    def test_handles_not_connected(self, mock_check):
+        mock_check.return_value = b"Not connected.\n"
+        link = rm_app_module.get_current_link('wlan0')
+        self.assertFalse(link['connected'])
+        self.assertIsNone(link['bssid'])
+
+    @patch('roaming_monitor.app.subprocess.check_output')
+    def test_handles_iw_failure_gracefully(self, mock_check):
+        mock_check.side_effect = OSError("boom")
+        link = rm_app_module.get_current_link('wlan0')
+        self.assertFalse(link['connected'])
+        self.assertIsNone(link['bssid'])
+
+    @patch('roaming_monitor.app.threading.Thread')
+    @patch('roaming_monitor.app.shutil.which')
+    @patch('roaming_monitor.app.platform.system')
+    @patch('roaming_monitor.app.get_current_link')
+    def test_start_seeds_state_and_emits_baseline(self, mock_link, mock_system,
+                                                  mock_which, mock_thread):
+        mock_system.return_value = 'Linux'
+        mock_which.return_value = '/usr/sbin/iw'
+        mock_link.return_value = {
+            "connected": True, "bssid": "aa:bb:cc:dd:ee:01", "ssid": "ChamberAP",
+        }
+
+        self.client.post('/api/start', json={'interface': 'wlan0'})
+
+        self.assertEqual(rm_app_module.state['current_bssid'], 'aa:bb:cc:dd:ee:01')
+        self.assertTrue(rm_app_module.state['connected'])
+        self.assertEqual(rm_app_module.state['ssid'], 'ChamberAP')
+
+        baseline = list(rm_app_module.events)[0]
+        self.assertEqual(baseline['type'], 'baseline')
+        self.assertIn('aa:bb:cc:dd:ee:01', baseline['detail'])
+
+    def test_first_roam_after_seeding_is_counted(self):
+        # Regression: without a seeded BSSID this connect classified as "initial",
+        # so the first roam of every session was lost from the statistics.
+        rm_app_module.state['current_bssid'] = 'aa:bb:cc:dd:ee:01'
+        rm_app_module.state['connected'] = True
+
+        rm_app_module.process_event(rm_app_module.parse_iw_event(
+            "9000.000000: wlan0 (phy #0): deauth aa:bb:cc:dd:ee:01 -> ff:ff:ff:ff:ff:ff reason 3: leaving"
+        ))
+        ev = rm_app_module.process_event(rm_app_module.parse_iw_event(
+            "9000.500000: wlan0 (phy #0): connected to aa:bb:cc:dd:ee:02"
+        ))
+
+        self.assertEqual(ev['transition'], 'roam')
+        self.assertEqual(ev['from_bssid'], 'aa:bb:cc:dd:ee:01')
+        self.assertAlmostEqual(ev['duration_ms'], 500.0, places=1)
+        self.assertEqual(rm_app_module.stats['roams'], 1)
 
 
 class TestIwEventParsing(unittest.TestCase):

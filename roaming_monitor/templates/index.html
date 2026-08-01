@@ -357,6 +357,7 @@
         .ev-error .ev-body { color: var(--color-pink); }
         .ev-auth .ev-body, .ev-assoc .ev-body { color: var(--color-blue); }
         .ev-scan .ev-body { color: var(--text-secondary); }
+        .ev-baseline .ev-body { color: var(--color-purple); font-weight: 600; }
         .ev-cqm .ev-body { color: var(--color-orange); }
         .ev-other .ev-body { color: var(--text-secondary); }
 
@@ -540,7 +541,9 @@
         function applyStats(data) {
             document.getElementById('stat-status').textContent =
                 data.running ? (data.connected ? 'Connected' : 'Watching') : 'Idle';
-            document.getElementById('stat-bssid').textContent = data.current_bssid || '—';
+            const bssidEl = document.getElementById('stat-bssid');
+            bssidEl.textContent = data.current_bssid || '—';
+            bssidEl.title = data.ssid ? 'SSID: ' + data.ssid : '';
             document.getElementById('stat-roams').textContent = data.roams ?? 0;
             document.getElementById('stat-last-roam').textContent = fmtMs(data.last_roam_ms);
             document.getElementById('stat-avg-roam').textContent = fmtMs(data.avg_roam_ms);

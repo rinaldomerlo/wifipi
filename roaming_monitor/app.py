@@ -93,6 +93,7 @@ state = {
     "interface": None,
     "connected": False,
     "current_bssid": None,
+    "ssid": None,
     "started_at": None,
     "error": None,
 }
@@ -145,6 +146,36 @@ def get_wireless_interfaces() -> list:
             pass
 
     return interfaces
+
+
+def get_current_link(interface: str) -> dict:
+    """
+    Current association for `interface`, read from `iw dev <iface> link`.
+
+    `iw event` only reports transitions as they happen, so a session started while
+    already associated has nothing to learn the BSSID from. That isn't just a blank
+    field: current_bssid is what classifies the next connect, so without seeding it
+    the first roam of a session reads as an "initial" connect and goes uncounted and
+    untimed. This is a plain read-only query, so it needs no sudo.
+    """
+    link = {"connected": False, "bssid": None, "ssid": None}
+    try:
+        output = subprocess.check_output(
+            ["iw", "dev", interface, "link"], stderr=subprocess.DEVNULL, timeout=5
+        ).decode("utf-8", errors="replace")
+    except Exception:
+        return link
+
+    connected = re.search(rf"Connected to ({MAC_RE})", output, re.I)
+    if connected:
+        link["connected"] = True
+        link["bssid"] = connected.group(1).lower()
+
+    ssid = re.search(r"^\s*SSID:\s*(.+)$", output, re.M)
+    if ssid:
+        link["ssid"] = ssid.group(1).strip()
+
+    return link
 
 
 def _boot_time_offset() -> float:
@@ -461,6 +492,9 @@ def api_start():
     if not shutil.which("iw"):
         return jsonify({"error": "iw is not installed. Run: sudo apt-get install iw"}), 400
 
+    # Seed from the live association so the first roam is classified and timed correctly.
+    link = get_current_link(interface)
+
     with state_lock:
         events.clear()
         stats.update({
@@ -469,9 +503,23 @@ def api_start():
         })
         _roam_durations.clear()
         state.update({
-            "running": True, "interface": interface, "connected": False,
-            "current_bssid": None, "error": None,
+            "running": True, "interface": interface,
+            "connected": link["connected"], "current_bssid": link["bssid"],
+            "ssid": link["ssid"], "error": None,
             "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        if link["connected"]:
+            baseline = (
+                f"monitoring {interface} — already associated to {link['bssid']}"
+                + (f" ({link['ssid']})" if link["ssid"] else "")
+            )
+        else:
+            baseline = f"monitoring {interface} — not currently associated"
+        _emit({
+            "type": "baseline", "detail": baseline, "raw": baseline,
+            "bssid": link["bssid"],
+            "time": datetime.now().strftime("%H:%M:%S.%f")[:-3],
         })
 
     while not output_queue.empty():

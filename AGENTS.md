@@ -199,6 +199,11 @@ Project Root Structure:
 - **Timestamps**: `iw event -t` stamps events with kernel seconds-since-boot, and those are used for all
   durations rather than the time Python read the line — a burst arriving in one `read()` would otherwise
   look simultaneous. `_boot_time_offset()` reads `/proc/uptime` once to map them to wall-clock for display.
+- **Seeding the current BSSID**: `iw event` only reports transitions as they occur, so a session
+  started while already associated has nothing to learn the current BSSID from. `get_current_link()`
+  reads it from `iw dev <iface> link` (unprivileged) at start and emits a `baseline` timeline entry.
+  This is correctness, not cosmetics: `current_bssid` is what classifies the next connect, so without
+  seeding, the first roam of every session read as an `initial` connect and went uncounted and untimed.
 - **Roam timing (`process_event`)**: the clock starts at the first sign of a transition — a
   deauth/disassoc/disconnect, *or* an auth/assoc involving anything other than the current BSSID, since
   802.11r fast transitions skip the disconnect entirely — and stops at the following `connected to`. A
