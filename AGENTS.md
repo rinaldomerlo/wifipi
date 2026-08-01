@@ -156,12 +156,17 @@ Project Root Structure:
   every TCP/UDP port closed or firewalled (phones, IoT, etc.).
 - **Scan model**: `scan_lan()` resolves the bind interface's subnet CIDR the same way
   `web_browsing_simulator.scan_for_servers()` does (`ip -4 addr show <iface>`, parsed with the
-  `ipaddress` module), then runs `sudo -n nmap -e <iface> -sn -n -T4 -oX - <cidr>` — `-sn` is a
-  ping/ARP sweep (no port scan), `-oX -` emits XML to stdout instead of the grepable format used
-  elsewhere in this repo, because XML reliably carries the `<address addrtype="mac" vendor="...">`
-  element that grepable output doesn't. `parse_nmap_hosts()` parses that XML with stdlib
-  `xml.etree.ElementTree` (no new dependency) into `{ip, mac, vendor, hostname, is_self}` dicts, keeping
-  only hosts with `<status state="up">`; `is_self` flags the Pi's own address so the UI can label it.
+  `ipaddress` module), then runs `sudo -n nmap -e <iface> -sn -T4 -oX - <cidr>` — `-sn` is a ping/ARP
+  sweep (no port scan), `-oX -` emits XML to stdout instead of the grepable format used elsewhere in
+  this repo, because XML reliably carries the `<address addrtype="mac" vendor="...">` element that
+  grepable output doesn't. Reverse-DNS is left enabled (no nmap `-n`) so the `hostname` field is
+  populated for devices with a PTR record, at the cost of some added scan latency per responding host.
+  `parse_nmap_hosts()` parses that XML with stdlib `xml.etree.ElementTree` (no new dependency) into
+  `{ip, mac, vendor, hostname, is_self}` dicts, keeping only hosts with `<status state="up">`; `is_self`
+  flags the Pi's own address so the UI can label it.
+  - Note: `sudo nmap -sn <cidr>` alone is *not* meaningfully different — run as root against a subnet on
+    a directly-connected interface, nmap already defaults to ARP-based discovery. The extra flags here
+    (`-e`, `-T4`, `-oX -`) are about interface pinning, speed, and structured output, not detection power.
 - **Privilege model**: unlike the unprivileged, port-scoped `nmap` calls elsewhere in this repo, an ARP
   sweep needs raw-socket access, so the scan shells out via `sudo -n nmap ...`. The `-n` on `sudo` makes
   it non-interactive — it fails fast with a clear stderr message instead of hanging the request if the

@@ -114,9 +114,10 @@ class TestNetworkDeviceScanner(unittest.TestCase):
 
         nmap_calls = [c for c in mock_run.call_args_list if c[0][0][0] == 'sudo']
         self.assertEqual(len(nmap_calls), 1)
-        self.assertIn('-n', nmap_calls[0][0][0])
-        self.assertIn('nmap', nmap_calls[0][0][0])
-        self.assertIn('wlan0', nmap_calls[0][0][0])
+        self.assertEqual(
+            nmap_calls[0][0][0],
+            ['sudo', '-n', 'nmap', '-e', 'wlan0', '-sn', '-T4', '-oX', '-', '192.168.1.0/24'],
+        )
 
     @patch('network_device_scanner.app.shutil.which')
     def test_scan_lan_raises_when_nmap_missing(self, mock_which):

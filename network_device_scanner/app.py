@@ -148,7 +148,9 @@ def scan_lan(bind_interface: str = "wlan0") -> dict:
 
     # sudo -n (non-interactive): fails fast with a clear error instead of hanging the
     # request if passwordless sudo for nmap hasn't been configured (see README).
-    cmd = ["sudo", "-n", "nmap", "-e", bind_interface, "-sn", "-n", "-T4", "-oX", "-", cidr]
+    # Reverse-DNS is left enabled (no nmap -n) so the hostname field actually gets
+    # populated for devices with a PTR record, at the cost of some added scan latency.
+    cmd = ["sudo", "-n", "nmap", "-e", bind_interface, "-sn", "-T4", "-oX", "-", cidr]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
