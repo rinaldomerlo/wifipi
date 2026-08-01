@@ -17,6 +17,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `wifi_connection_manager/` | Flask app — scans/connects/disconnects WiFi via `nmcli` (NetworkManager). Port 5003, proxied at `/wificonnect/`. |
 | `web_browsing_simulator/` | Flask app — simulates bursty web-browsing traffic against another Pi's synthetic page corpus. Port 5004, proxied at `/webbrowse/`. |
 | `client_simulator/` | Flask app — simulates many clients behind one WiFi association via netns/veth/bridge NAT, with churn. Port 5005, proxied at `/clientsim/`. |
+| `network_device_scanner/` | Flask app — ARP-based LAN device inventory (IP/MAC/vendor) via `nmap -sn` on a chosen Bind Interface. Port 5006, proxied at `/devices/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -39,6 +40,7 @@ cd iperf_server_manager && ../.venv/bin/python app.py            # :5002
 cd wifi_connection_manager && ../.venv/bin/python app.py         # :5003
 cd web_browsing_simulator && ../.venv/bin/python app.py          # :5004
 cd client_simulator && ../.venv/bin/python app.py                # :5005
+cd network_device_scanner && ../.venv/bin/python app.py          # :5006
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -55,15 +57,21 @@ Code that shells out to system tools must degrade gracefully off-Linux rather th
 `try/except`, check `shutil.which(...)`, or fall back. Tests must pass on macOS with no privileged
 tooling present; mock the subprocess boundary instead of requiring the real binary.
 
-Three apps need passwordless sudo in production (rules documented in `README.md` and `AGENTS.md`):
-`iw` for the WiFi monitor, `systemctl ... iperf3*` for the server manager, and `nmcli` for the connection
-manager. The connection manager also requires NetworkManager to be the active network backend — it does
-not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
+Four apps need passwordless sudo in production (rules documented in `README.md` and `AGENTS.md`):
+`iw` for the WiFi monitor, `systemctl ... iperf3*` for the server manager, `nmcli` for the connection
+manager, and `nmap` for the network device scanner's ARP sweep. The connection manager also requires
+NetworkManager to be the active network backend — it does not work against the older
+`dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
 
 `client_simulator` needs root for `ip`/`iptables`/`sysctl` (network namespaces, veth, NAT); its systemd
 unit runs as `root` by default so no sudoers entry is needed unless it's reconfigured to run as a non-root
 user. It detects at runtime whether real namespaces are usable (`detect_mode()` in `app.py`) and falls
 back to a plain-thread/urllib simulation otherwise — this is what makes it work on macOS in dev.
+
+`network_device_scanner` invokes `sudo -n nmap -sn ...` (non-interactive, so it fails fast with a clear
+error instead of hanging a request) for its ARP-based host sweep. Off-Linux or without the sudoers rule
+configured, the scan route returns a JSON error rather than crashing — this is what makes it degrade
+gracefully on macOS in dev.
 
 ---
 
@@ -100,6 +108,6 @@ Any new screen added to this project inherits both the design system and the hos
 - Keep each app's HTML/CSS/JS inline in its template, matching the file it lives in — this project
   deliberately avoids a build step or shared asset pipeline.
 - Add tests to the matching `tests/test_*.py` module. Note the import guard at the top of those files
-  (`del sys.modules['app']`) that prevents collisions between the four same-named `app` modules —
-  preserve it.
+  (`del sys.modules['app']`) that prevents collisions between the same-named `app` modules across the
+  different Flask apps — preserve it.
 - Do not commit or push unless asked.

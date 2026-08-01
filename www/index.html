@@ -63,7 +63,21 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 1.25rem;
-            margin-bottom: 2rem;
+        }
+
+        .section-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .section-divider {
+            border: none;
+            border-top: 1px solid var(--card-border);
+            margin: 2.5rem 0 1.75rem;
         }
 
         .app-card {
@@ -136,6 +150,7 @@
             font-size: 0.8rem;
             border-top: 1px solid var(--card-border);
             padding-top: 1rem;
+            margin-top: 2rem;
         }
 
         /* Hostname badge — identifies which machine is serving this page */
@@ -181,6 +196,7 @@
             </span>
         </header>
 
+        <div class="section-label">Monitoring &amp; Management</div>
         <div class="apps-grid">
             <a href="/wifimon/" class="app-card">
                 <div>
@@ -234,6 +250,24 @@
                 </div>
             </a>
 
+            <a href="/devices/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">Network Device Scanner <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/devices/</span>
+                    </div>
+                    <p class="card-desc">Run a privileged ARP sweep of the subnet behind a chosen Bind Interface to inventory every live device on the network, with MAC address and vendor.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="section-label">Traffic Generators &mdash; Router Load Testing</div>
+        <div class="apps-grid">
             <a href="/webbrowse/" class="app-card">
                 <div>
                     <div class="card-header">
@@ -287,7 +321,8 @@
                 '/iperf/api/hostname',
                 '/wificonnect/api/hostname',
                 '/webbrowse/api/hostname',
-                '/clientsim/api/hostname'
+                '/clientsim/api/hostname',
+                '/devices/api/hostname'
             ];
 
             (function tryNext(i) {

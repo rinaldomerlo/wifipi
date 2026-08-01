@@ -47,6 +47,10 @@ server {
         return 301 /clientsim/;
     }
 
+    location = /devices {
+        return 301 /devices/;
+    }
+
     # WiFi Channel & Utilization Monitor subpath (/wifimon/)
     location /wifimon/ {
         proxy_pass http://127.0.0.1:5000/;
@@ -122,5 +126,14 @@ server {
         proxy_buffering off;
         proxy_cache off;
         chunked_transfer_encoding on;
+    }
+
+    # Network Device Scanner subpath (/devices/)
+    location /devices/ {
+        proxy_pass http://127.0.0.1:5006/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }

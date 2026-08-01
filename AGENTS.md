@@ -20,6 +20,7 @@ Project Root Structure:
 - `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
 - `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
 - `client_simulator/` — Simulates many independent clients behind a single WiFi association using isolated Linux network namespaces NAT'd out one radio, with a churn engine cycling client identities.
+- `network_device_scanner/` — ARP-based LAN device inventory (IP/MAC/vendor/hostname) via a privileged `nmap -sn` sweep of a chosen Bind Interface's subnet.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -36,7 +37,11 @@ Project Root Structure:
     <username> ALL=(ALL) NOPASSWD: /usr/sbin/iw
     ```
 - **Frontend (`static/js/app.js`, `templates/index.html`)**:
-  - Configurable refresh rate options (10s, 30s, 1m, 2m, 5m).
+  - Configurable refresh rate options (3s, 5s, 10s, 30s, 1m, 2m, 5m, manual) — a live scan
+    (`sudo iw dev <interface> scan`) takes several seconds by itself (~3s observed on a Pi); the 1s/2s
+    options were removed since they could never actually be honored. Note that at 3s the scan can still
+    occasionally run long enough for a tick to be silently skipped by the frontend's `isScanning` guard
+    (`static/js/app.js:554-558`) — that's expected, not a bug.
   - Multi-band support (2.4, 5, 6 GHz, and All Bands).
   - *Initialization Note*: Band visibility and chart container wrappers (`wrapper6`, `wrapperUtil6`, etc.) must explicitly invoke `updateBandVisibility()` during DOM initialization (`initElements()`) to ensure 6 GHz graphs display correctly on initial page load.
 
@@ -143,6 +148,35 @@ Project Root Structure:
   Also expects `curl` and `dig` (package `dnsutils`) to be installed, since traffic generation shells out
   to them inside each namespace rather than using Python's HTTP/DNS stack directly.
 
+### G. Network Device Scanner (`network_device_scanner`)
+- **Purpose**: Inventories every device currently reachable on the LAN behind a chosen Bind Interface —
+  IP, MAC address, vendor, and (if resolvable) hostname. Distinct from the narrow, port-scoped `nmap`
+  probes in `iperf_congestion_generator` and `web_browsing_simulator`, which only discover other Pis
+  running their own service; this app does a real ARP-based host sweep, so it also sees devices with
+  every TCP/UDP port closed or firewalled (phones, IoT, etc.).
+- **Scan model**: `scan_lan()` resolves the bind interface's subnet CIDR the same way
+  `web_browsing_simulator.scan_for_servers()` does (`ip -4 addr show <iface>`, parsed with the
+  `ipaddress` module), then runs `sudo -n nmap -e <iface> -sn -n -T4 -oX - <cidr>` — `-sn` is a
+  ping/ARP sweep (no port scan), `-oX -` emits XML to stdout instead of the grepable format used
+  elsewhere in this repo, because XML reliably carries the `<address addrtype="mac" vendor="...">`
+  element that grepable output doesn't. `parse_nmap_hosts()` parses that XML with stdlib
+  `xml.etree.ElementTree` (no new dependency) into `{ip, mac, vendor, hostname, is_self}` dicts, keeping
+  only hosts with `<status state="up">`; `is_self` flags the Pi's own address so the UI can label it.
+- **Privilege model**: unlike the unprivileged, port-scoped `nmap` calls elsewhere in this repo, an ARP
+  sweep needs raw-socket access, so the scan shells out via `sudo -n nmap ...`. The `-n` on `sudo` makes
+  it non-interactive — it fails fast with a clear stderr message instead of hanging the request if the
+  sudoers rule isn't configured, which is what lets it degrade gracefully off-Linux (e.g. macOS dev,
+  where the sudo prompt has no TTY to read from).
+- **Caching**: the last scan result is kept in a module-level `last_scan` dict so `GET /api/devices` can
+  return it instantly (used for the initial page load and the UI's auto-refresh poll) without forcing a
+  new privileged scan on every request; `POST /api/scan` is what actually triggers `scan_lan()`.
+- **System Privilege Requirement**: Executes `sudo nmap -sn ...`. Needs a sudoers rule even when running
+  as a non-root user (its systemd unit runs as the app user, not root, since unlike `client_simulator` it
+  has no other need for root):
+  ```text
+  <username> ALL=(ALL) NOPASSWD: /usr/bin/nmap
+  ```
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -176,6 +210,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - WiFi Connection Manager worker: bound to `0.0.0.0:5003` (2 workers).
    - Web Browsing Simulator worker: bound to `0.0.0.0:5004` (1 worker, multi-threaded for SSE streaming).
    - Client Simulator worker: bound to `0.0.0.0:5005` (1 worker, multi-threaded for SSE streaming; runs as root by default since it needs `ip`/`iptables`/`sysctl`).
+   - Network Device Scanner worker: bound to `0.0.0.0:5006` (1 worker; `sudo -n nmap` needs a sudoers rule since this app runs as the app user, not root).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
@@ -183,6 +218,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `wifi-connection-manager.service`
    - `web-browsing-simulator.service`
    - `client-simulator.service`
+   - `network-device-scanner.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
@@ -191,6 +227,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/wificonnect/`): Proxies to WiFi Connection Manager (`127.0.0.1:5003`).
    - Port `80` (Subpath `/webbrowse/`): Proxies to Web Browsing Simulator (`127.0.0.1:5004`) with buffering disabled for SSE, except `/webbrowse/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/web_browsing_simulator/content/`.
    - Port `80` (Subpath `/clientsim/`): Proxies to Client Simulator (`127.0.0.1:5005`) with buffering disabled for SSE.
+   - Port `80` (Subpath `/devices/`): Proxies to Network Device Scanner (`127.0.0.1:5006`).
 
 ---
 

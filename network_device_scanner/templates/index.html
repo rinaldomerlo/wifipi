@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /devices to /devices/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Device Scanner - WiFiPi</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i {
+            color: var(--color-blue);
+        }
+
+        .host-badge strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.1rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .card-header-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--glass-border);
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .card-header-title h2 {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: var(--text-primary);
+        }
+
+        .card-header-title h2 i {
+            color: var(--color-blue);
+        }
+
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat-box {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--color-blue);
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.4rem;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.7rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        select option {
+            background-color: var(--bg-light);
+            color: var(--text-primary);
+        }
+
+        .row-group {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .row-group > div {
+            min-width: 160px;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.88rem;
+            padding: 0.7rem 1.2rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-blue {
+            background: linear-gradient(135deg, var(--color-blue) 0%, #0091ea 100%);
+            color: #08090f;
+            box-shadow: 0 4px 12px rgba(0, 210, 255, 0.2);
+        }
+
+        .btn-blue:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 210, 255, 0.35);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-self {
+            background: rgba(0, 210, 255, 0.15);
+            color: var(--color-blue);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        th {
+            padding: 0.75rem 1rem;
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--glass-border);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--glass-border);
+            vertical-align: middle;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .mono {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        #status-bar {
+            font-size: 0.85rem;
+            min-height: 1.4em;
+            font-weight: 500;
+            margin-top: 1rem;
+        }
+
+        .alert {
+            background: rgba(255, 59, 116, 0.1);
+            border: 1px solid rgba(255, 59, 116, 0.3);
+            color: var(--color-pink);
+            border-radius: 10px;
+            padding: 0.85rem 1.1rem;
+            font-size: 0.85rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-magnifying-glass-location logo-icon"></i>
+                <div class="logo-text">
+                    <h1>Network <span>Device Scanner</span></h1>
+                    <span class="subtitle">ARP-Based LAN Device Inventory</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <div class="stats-summary">
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-list-check"></i> Devices Found</span>
+                <span id="stat-count" class="stat-value">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-diagram-project"></i> Subnet Scanned</span>
+                <span id="stat-cidr" class="stat-value" style="font-size: 1.1rem; padding-top: 0.3rem;">—</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-clock"></i> Last Scan</span>
+                <span id="stat-timestamp" class="stat-value" style="font-size: 1.1rem; padding-top: 0.3rem;">Never</span>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <div class="row-group">
+                <div>
+                    <label for="interface"><i class="fa-solid fa-ethernet"></i> Bind Interface</label>
+                    <select id="interface">
+                        <option value="wlan0">wlan0</option>
+                        <option value="eth0">eth0</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="auto-refresh-interval"><i class="fa-solid fa-rotate"></i> Auto-Refresh</label>
+                    <select id="auto-refresh-interval" onchange="updateAutoRefresh()">
+                        <option value="0" selected>Off</option>
+                        <option value="10">Every 10s</option>
+                        <option value="30">Every 30s</option>
+                        <option value="60">Every 60s</option>
+                    </select>
+                </div>
+                <div style="min-width: auto;">
+                    <button id="btn-scan" class="btn btn-blue" onclick="scanNow()"><i class="fa-solid fa-satellite-dish"></i> Scan Now</button>
+                </div>
+            </div>
+            <div class="hint" style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.75rem;">
+                Runs a privileged ARP sweep of the chosen interface's subnet — finds every live device
+                (including ones with no open ports) and reports its MAC address and vendor. Requires
+                passwordless <code>sudo nmap</code> on the host (see README).
+            </div>
+            <div id="status-bar"></div>
+            <div id="error-box"></div>
+        </div>
+
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-network-wired"></i> Devices on the Network</h2>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP Address</th>
+                            <th>MAC Address</th>
+                            <th>Vendor</th>
+                            <th>Hostname</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-list">
+                        <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No scan run yet — click "Scan Now" to begin.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshTimer = null;
+        let scanning = false;
+
+        function showStatus(msg, color) {
+            const sb = document.getElementById('status-bar');
+            sb.innerHTML = msg;
+            sb.style.color = color || 'var(--color-blue)';
+        }
+
+        function showError(msg) {
+            const box = document.getElementById('error-box');
+            box.innerHTML = msg ? `<div class="alert"><i class="fa-solid fa-triangle-exclamation"></i> ${msg}</div>` : '';
+        }
+
+        function renderDevices(devices) {
+            const tbody = document.getElementById('devices-list');
+            if (!devices || devices.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No devices found.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = devices.map(d => {
+                const selfBadge = d.is_self ? ' <span class="badge badge-self">This Device</span>' : '';
+                return `
+                    <tr>
+                        <td><span class="mono" style="color: var(--text-primary); font-weight: 600;">${d.ip}</span>${selfBadge}</td>
+                        <td><span class="mono">${d.mac || '—'}</span></td>
+                        <td>${d.vendor || '—'}</td>
+                        <td>${d.hostname || '—'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function applyResult(data) {
+            document.getElementById('stat-count').textContent = data.count || 0;
+            document.getElementById('stat-cidr').textContent = data.cidr || '—';
+            document.getElementById('stat-timestamp').textContent = data.timestamp || 'Never';
+            renderDevices(data.devices || []);
+            showError(data.error || '');
+        }
+
+        async function loadCached() {
+            try {
+                const res = await fetch('api/devices', { cache: 'no-store' });
+                const data = await res.json();
+                applyResult(data);
+                if (data.timestamp) {
+                    showStatus('<i class="fa-solid fa-check"></i> Showing last scan from ' + data.timestamp, 'var(--color-secondary)');
+                }
+            } catch (e) { /* ignore transient load failures */ }
+        }
+
+        async function scanNow() {
+            if (scanning) return;
+            scanning = true;
+            const btn = document.getElementById('btn-scan');
+            btn.disabled = true;
+            const bindInterface = document.getElementById('interface').value || 'wlan0';
+            showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Scanning subnet on ' + bindInterface + '…', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bind_interface: bindInterface })
+                });
+                const data = await res.json();
+                applyResult(data);
+                if (data.success) {
+                    showStatus('<i class="fa-solid fa-check"></i> Scan complete at ' + data.timestamp, 'var(--color-green)');
+                } else {
+                    showStatus('<i class="fa-solid fa-triangle-exclamation"></i> Scan failed', 'var(--color-pink)');
+                }
+            } catch (e) {
+                showStatus('Failed to reach backend: ' + e, 'var(--color-pink)');
+            } finally {
+                scanning = false;
+                btn.disabled = false;
+            }
+        }
+
+        function updateAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+            const intervalSec = parseInt(document.getElementById('auto-refresh-interval').value);
+            if (intervalSec > 0) {
+                autoRefreshTimer = setInterval(scanNow, intervalSec * 1000);
+            }
+        }
+
+        // Initial load: show any cached result immediately without forcing a scan.
+        loadCached();
+    </script>
+</body>
+</html>
