@@ -12,9 +12,12 @@ After=network.target
 #
 # This has to be edited in place: systemd does not expand environment variables
 # in User=, so it cannot be read from a config file or EnvironmentFile.
+#
+# Group= is deliberately NOT set: systemd then uses the account's primary group
+# from /etc/passwd. Hardcoding a group that happens to match the username fails
+# with status=216/GROUP on any image where the two differ.
 # ============================================================================
 User=pi
-Group=pi
 
 # Running unprivileged is deliberate -- this is a full interactive shell, unlike
 # every other WiFiPi unit, which run as root to reach iw/nmcli/nmap. sudo still

@@ -252,10 +252,11 @@ Project Root Structure:
 - **System Privilege Requirement — none, and deliberately less than its siblings**: this is the only app
   whose units set a non-root `User=`. Both units default to `pi` under a marked block at the top of their
   `[Service]` section and must be changed together, since modern Raspberry Pi OS images have no `pi`
-  account. The value is edited in place because systemd does not expand environment variables in `User=`. A browser shell is a categorically wider surface than the constrained
-  `sudo nmcli` / `sudo nmap` the other apps expose, so the session is unprivileged and `sudo` inside it
-  prompts for a password. Note this is a blast-radius reduction, **not** an authentication boundary:
-  the app has no auth, so it belongs on an isolated chamber network only.
+  account. The value is edited in place because systemd does not expand environment variables in `User=`.
+  Neither unit sets `Group=` — systemd falls back to the account's primary group from `/etc/passwd`,
+  which is correct everywhere; a hardcoded `Group=` matching the username fails with `status=216/GROUP`
+  on images where the primary group differs. The app has no authentication of its own; `ttyd`'s
+  `--credential user:password` is available if it's ever wanted.
 
 ---
 

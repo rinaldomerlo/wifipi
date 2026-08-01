@@ -23,7 +23,7 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
 8. **WiFi Roaming Monitor (`roaming_monitor`)**  
    A browser-based live timeline of association events (`iw event`) for a chosen wireless interface: authentication, association, connection, deauthentication and disconnection, each timestamped from the kernel and streamed to the browser. Measures how long a roam between two BSSIDs actually took — including 802.11r fast transitions that skip the disconnect entirely — and decodes 802.11 reason codes so a drop reports "4-Way Handshake timeout" rather than "reason 15". Intended for chamber testing where a variable attenuator is used to force transitions between APs.
 9. **Web Terminal (`web_terminal`)**  
-   A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as an **unprivileged user**, so `sudo` inside the session prompts for a password. Requires a one-off manual install of `ttyd` (see below).
+   A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as a non-root user. Requires a one-off manual install of `ttyd` (see below).
 10. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
@@ -105,9 +105,9 @@ sudo install -m 755 ttyd.aarch64 /usr/local/bin/ttyd
 ttyd --version
 ```
 
-Use `ttyd.armhf` on a 32-bit image. Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the current version and to verify the checksum.
+Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the current version and to verify the checksum.
 
-> ⚠️ **The Web Terminal exposes an interactive shell over plain HTTP with no authentication.** Anyone who can reach the Pi on port 80 gets a shell on it. `deploy/ttyd.service` mitigates this by running as an unprivileged user (`User=pi`) and binding ttyd to loopback so Nginx is the only route in, but it is *not* an authentication boundary. Deploy this only on an isolated test/chamber network. If the Pi is reachable from anywhere less trusted, either add `--credential user:password` to the `ExecStart` line in `deploy/ttyd.service` or skip installing these two services entirely — every other app works without them.
+The Web Terminal has no authentication, so anyone who can reach the Pi gets a shell. If you want a password on it, add `--credential user:password` to the `ExecStart` line in `deploy/ttyd.service`.
 
 Then install the service units:
 
@@ -133,12 +133,14 @@ sudo systemctl daemon-reload
 
 ```bash
 TERM_USER=<your-username>
-sudo sed -i "s/^User=pi$/User=$TERM_USER/; s/^Group=pi$/Group=$TERM_USER/" \
+sudo sed -i "s/^User=pi$/User=$TERM_USER/" \
     /etc/systemd/system/ttyd.service /etc/systemd/system/web-terminal.service
 sudo systemctl daemon-reload
 ```
 
 This is an in-place edit rather than a config setting because systemd does not expand environment variables in `User=`. Pointing it at a non-existent account fails with `status=217/USER`.
+
+Note that neither unit sets `Group=`, so systemd uses the account's primary group from `/etc/passwd`. Don't add one: on images where the primary group isn't named after the user, a hardcoded `Group=` fails with `status=216/GROUP`. Check yours with `id <your-username>` if you're curious. If a unit has already failed repeatedly, systemd latches its rate limiter and you need `sudo systemctl reset-failed ttyd web-terminal` before it will start again.
 
 Enable and start services:
 

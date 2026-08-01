@@ -87,7 +87,9 @@ health check, so it shells out to nothing and needs no privileges. Two consequen
   `deploy/web-terminal.service` default to `User=pi` under a marked block at the top of `[Service]`, and
   **both must be changed together** to the real account — modern Raspberry Pi OS has no `pi` user. It is
   an in-place edit by design: systemd does not expand environment variables in `User=`, so this cannot be
-  driven from an `EnvironmentFile`. Don't try to "improve" it into one.
+  driven from an `EnvironmentFile`. Don't try to "improve" it into one. Neither unit sets `Group=`, so
+  systemd inherits the account's primary group; adding one back breaks with `status=216/GROUP` whenever
+  the primary group isn't named after the user.
 - `ttyd` is **not in Debian bookworm or trixie** (only sid), so it is installed manually from upstream's
   static release binary — see `README.md`. Don't "fix" this to `apt install ttyd`; it will fail.
 
