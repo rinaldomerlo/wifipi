@@ -1,0 +1,43 @@
+[Unit]
+Description=ttyd Web Terminal Backend for WiFiPi
+After=network.target
+
+[Service]
+# ============================================================================
+# SET YOUR USERNAME HERE (and in web-terminal.service -- both must match).
+#
+# Raspberry Pi OS Bookworm and later no longer create a default 'pi' user, so
+# this almost certainly needs changing to the account you created at imaging
+# time. A non-existent user makes systemd fail with status=217/USER.
+#
+# This has to be edited in place: systemd does not expand environment variables
+# in User=, so it cannot be read from a config file or EnvironmentFile.
+# ============================================================================
+User=pi
+Group=pi
+
+# Running unprivileged is deliberate -- this is a full interactive shell, unlike
+# every other WiFiPi unit, which run as root to reach iw/nmcli/nmap. sudo still
+# works inside the session but prompts for a password interactively.
+# --interface lo   : bind to loopback only, so port 5009 is unreachable from the
+#                    LAN directly and nginx is the sole route in.
+# --writable       : ttyd is READ-ONLY by default; without this the terminal
+#                    displays output but accepts no keystrokes.
+# --base-path      : makes ttyd emit asset and WebSocket URLs correct for the
+#                    /terminal/tty/ prefix. Without it the frame loads but the
+#                    WebSocket connects to the wrong path and the terminal hangs.
+# -t theme=...     : themes the embedded xterm.js to the WiFiPi palette so the
+#                    framed terminal reads as part of the page.
+ExecStart=/usr/local/bin/ttyd \
+    --port 5009 \
+    --interface lo \
+    --writable \
+    --base-path /terminal/tty \
+    -t fontSize=14 \
+    -t 'fontFamily=Space Grotesk, Menlo, Consolas, monospace' \
+    -t 'theme={"background":"#08090f","foreground":"#f5f6fa","cursor":"#00d2ff","selectionBackground":"rgba(0,210,255,0.3)"}' \
+    /bin/bash --login
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

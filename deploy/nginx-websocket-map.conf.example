@@ -1,0 +1,18 @@
+# WebSocket upgrade map for the WiFiPi Web Terminal (ttyd backend).
+#
+# This cannot live in nginx.conf.example: that file is a `server { }` block for
+# sites-available, but `map` is only valid in `http { }` context. Debian's nginx
+# includes /etc/nginx/conf.d/*.conf at http level, so install it there:
+#
+#   sudo cp deploy/nginx-websocket-map.conf.example /etc/nginx/conf.d/websocket-upgrade.conf
+#   sudo nginx -t
+#   sudo systemctl reload nginx
+#
+# It maps the incoming Upgrade header to the correct Connection header value, so
+# the same location can serve ttyd's plain HTTP assets and its WebSocket without
+# sending a bogus "Connection: upgrade" on ordinary requests.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}

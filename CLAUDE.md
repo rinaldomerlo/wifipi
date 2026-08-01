@@ -19,6 +19,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `client_simulator/` | Flask app — simulates many clients behind one WiFi association via netns/veth/bridge NAT, with churn. Port 5005, proxied at `/clientsim/`. |
 | `network_device_scanner/` | Flask app — ARP-based LAN device inventory (IP/MAC/vendor) via `nmap -sn` on a chosen Bind Interface. Port 5006, proxied at `/devices/`. |
 | `roaming_monitor/` | Flask app — live association-event timeline from `iw event`, with roam timing and decoded 802.11 reason codes. Port 5007, proxied at `/roaming/`. |
+| `web_terminal/` | Flask app — thin wrapper framing a `ttyd` browser shell. Port 5008, proxied at `/terminal/`; `ttyd` itself listens on loopback:5009. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -43,6 +44,7 @@ cd web_browsing_simulator && ../.venv/bin/python app.py          # :5004
 cd client_simulator && ../.venv/bin/python app.py                # :5005
 cd network_device_scanner && ../.venv/bin/python app.py          # :5006
 cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
+cd web_terminal && ../.venv/bin/python app.py                    # :5008
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -74,6 +76,24 @@ back to a plain-thread/urllib simulation otherwise — this is what makes it wor
 error instead of hanging a request) for its ARP-based host sweep. Off-Linux or without the sudoers rule
 configured, the scan route returns a JSON error rather than crashing — this is what makes it degrade
 gracefully on macOS in dev.
+
+`web_terminal` is the odd one out and deliberately so. It owns **no** terminal logic: the PTY, VT/ANSI
+emulation, resize and reconnect all belong to `ttyd`, a separate daemon bound to `127.0.0.1:5009` that
+embeds xterm.js. The Flask app only renders the shared header around an iframe and TCP-probes ttyd for a
+health check, so it shells out to nothing and needs no privileges. Two consequences worth remembering:
+
+- It is the **only app that runs as a non-root user**, because a browser shell is a far wider surface
+  than the constrained `sudo nmcli` / `sudo nmap` the other apps expose. Both `deploy/ttyd.service` and
+  `deploy/web-terminal.service` default to `User=pi` under a marked block at the top of `[Service]`, and
+  **both must be changed together** to the real account — modern Raspberry Pi OS has no `pi` user. It is
+  an in-place edit by design: systemd does not expand environment variables in `User=`, so this cannot be
+  driven from an `EnvironmentFile`. Don't try to "improve" it into one.
+- `ttyd` is **not in Debian bookworm or trixie** (only sid), so it is installed manually from upstream's
+  static release binary — see `README.md`. Don't "fix" this to `apt install ttyd`; it will fail.
+
+Its nginx block also needs the `$connection_upgrade` map from `deploy/nginx-websocket-map.conf.example`,
+which lives in `/etc/nginx/conf.d/` rather than the site config because `map` is only valid in `http`
+context. If you add WebSocket routes elsewhere, reuse that map rather than redefining it.
 
 `roaming_monitor` follows `sudo -n iw event -t` in a background thread; it reuses the WiFi monitor's
 existing `iw` sudoers rule, so no new privilege is needed. Its start route refuses up front on non-Linux

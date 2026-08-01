@@ -275,6 +275,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/terminal/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">Web Terminal <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/terminal/</span>
+                    </div>
+                    <p class="card-desc">Interactive shell on this Pi in the browser, for the commands the other apps don't cover. Runs as an unprivileged user.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <hr class="section-divider">
@@ -336,7 +349,8 @@
                 '/webbrowse/api/hostname',
                 '/clientsim/api/hostname',
                 '/devices/api/hostname',
-                '/roaming/api/hostname'
+                '/roaming/api/hostname',
+                '/terminal/api/hostname'
             ];
 
             (function tryNext(i) {

@@ -22,7 +22,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based tool that inventories every device currently reachable on the LAN behind a chosen Bind Interface — IP address, MAC address, vendor, and hostname — via a privileged ARP-based `nmap -sn` sweep, so it finds devices even when every port they expose is closed or firewalled.
 8. **WiFi Roaming Monitor (`roaming_monitor`)**  
    A browser-based live timeline of association events (`iw event`) for a chosen wireless interface: authentication, association, connection, deauthentication and disconnection, each timestamped from the kernel and streamed to the browser. Measures how long a roam between two BSSIDs actually took — including 802.11r fast transitions that skip the disconnect entirely — and decodes 802.11 reason codes so a drop reports "4-Way Handshake timeout" rather than "reason 15". Intended for chamber testing where a variable attenuator is used to force transitions between APs.
-9. **Default Landing Webpage (`www`)**  
+9. **Web Terminal (`web_terminal`)**  
+   A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as an **unprivileged user**, so `sudo` inside the session prompts for a password. Requires a one-off manual install of `ttyd` (see below).
+10. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -93,6 +95,22 @@ To allow the app user to execute these commands without a password prompt:
 
 Systemd service files are provided in the `deploy/` directory. Copy them to `/etc/systemd/system/`:
 
+#### Prerequisite for the Web Terminal: install `ttyd`
+
+The Web Terminal is the only app with a dependency outside the Python virtualenv. **`ttyd` is not packaged in Debian Bookworm or Trixie** (only in `sid`), so `apt install ttyd` will fail on Raspberry Pi OS. Install upstream's static release binary instead:
+
+```bash
+wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.aarch64
+sudo install -m 755 ttyd.aarch64 /usr/local/bin/ttyd
+ttyd --version
+```
+
+Use `ttyd.armhf` on a 32-bit image. Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the current version and to verify the checksum.
+
+> ⚠️ **The Web Terminal exposes an interactive shell over plain HTTP with no authentication.** Anyone who can reach the Pi on port 80 gets a shell on it. `deploy/ttyd.service` mitigates this by running as an unprivileged user (`User=pi`) and binding ttyd to loopback so Nginx is the only route in, but it is *not* an authentication boundary. Deploy this only on an isolated test/chamber network. If the Pi is reachable from anywhere less trusted, either add `--credential user:password` to the `ExecStart` line in `deploy/ttyd.service` or skip installing these two services entirely — every other app works without them.
+
+Then install the service units:
+
 ```bash
 sudo cp deploy/wifi-monitor.service /etc/systemd/system/
 sudo cp deploy/iperf-generator.service /etc/systemd/system/
@@ -102,10 +120,25 @@ sudo cp deploy/web-browsing-simulator.service /etc/systemd/system/
 sudo cp deploy/client-simulator.service /etc/systemd/system/
 sudo cp deploy/network-device-scanner.service /etc/systemd/system/
 sudo cp deploy/roaming-monitor.service /etc/systemd/system/
+sudo cp deploy/web-terminal.service /etc/systemd/system/
+sudo cp deploy/ttyd.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
 *Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit the service files in `/etc/systemd/system/` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
+
+#### Set the Web Terminal's user account
+
+`ttyd.service` and `web-terminal.service` both default to `User=pi`, but Raspberry Pi OS Bookworm and later no longer create a `pi` user — so unless you deliberately named your account `pi`, change it in **both** files. Each has a clearly marked block at the top of its `[Service]` section; edit those, or set both at once:
+
+```bash
+TERM_USER=<your-username>
+sudo sed -i "s/^User=pi$/User=$TERM_USER/; s/^Group=pi$/Group=$TERM_USER/" \
+    /etc/systemd/system/ttyd.service /etc/systemd/system/web-terminal.service
+sudo systemctl daemon-reload
+```
+
+This is an in-place edit rather than a config setting because systemd does not expand environment variables in `User=`. Pointing it at a non-existent account fails with `status=217/USER`.
 
 Enable and start services:
 
@@ -118,6 +151,8 @@ sudo systemctl enable --now web-browsing-simulator
 sudo systemctl enable --now client-simulator
 sudo systemctl enable --now network-device-scanner
 sudo systemctl enable --now roaming-monitor
+sudo systemctl enable --now ttyd
+sudo systemctl enable --now web-terminal
 ```
 
 Verify service status:
@@ -130,6 +165,8 @@ sudo systemctl status web-browsing-simulator
 sudo systemctl status client-simulator
 sudo systemctl status network-device-scanner
 sudo systemctl status roaming-monitor
+sudo systemctl status ttyd
+sudo systemctl status web-terminal
 ```
 
 #### Multi-Port iPerf3 Server Services (Optional)
@@ -148,7 +185,7 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, and `/roaming/` to the respective backend Flask apps.
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, `/roaming/`, and `/terminal/` to the respective backend Flask apps.
 
 For `/webbrowse/` specifically, Nginx also serves the app's generated synthetic content directly as
 static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
@@ -162,13 +199,22 @@ same as it already needs for `/opt/wifipi/www`.
    sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/wifipi
    ```
 
-2. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
+2. Install the WebSocket upgrade map required by the Web Terminal. This has to be a separate file:
+   `nginx.conf.example` is a `server { }` block, but nginx's `map` directive is only valid in `http { }`
+   context, and Debian's nginx includes `/etc/nginx/conf.d/*.conf` at that level:
+   ```bash
+   sudo cp deploy/nginx-websocket-map.conf.example /etc/nginx/conf.d/websocket-upgrade.conf
+   ```
+   Skip this only if you are also skipping the Web Terminal — without it, `nginx -t` fails with
+   `unknown "connection_upgrade" variable`.
+
+3. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
    ```bash
    sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
 
-3. Test the Nginx configuration, then enable and (re)start Nginx:
+4. Test the Nginx configuration, then enable and (re)start Nginx:
    ```bash
    sudo nginx -t
    sudo systemctl enable --now nginx
@@ -196,3 +242,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **Client Simulator**: Open `http://<pi-ip>/clientsim/` (Subpath `/clientsim/` reverse-proxied to Gunicorn on port 5005)
 - **Network Device Scanner**: Open `http://<pi-ip>/devices/` (Subpath `/devices/` reverse-proxied to Gunicorn on port 5006)
 - **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)
+- **Web Terminal**: Open `http://<pi-ip>/terminal/` (Subpath `/terminal/` reverse-proxied to Gunicorn on port 5008, with `/terminal/tty/` reverse-proxied to the loopback-bound `ttyd` on port 5009)

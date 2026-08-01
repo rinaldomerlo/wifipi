@@ -22,6 +22,7 @@ Project Root Structure:
 - `client_simulator/` — Simulates many independent clients behind a single WiFi association using isolated Linux network namespaces NAT'd out one radio, with a churn engine cycling client identities.
 - `network_device_scanner/` — ARP-based LAN device inventory (IP/MAC/vendor/hostname) via a privileged `nmap -sn` sweep of a chosen Bind Interface's subnet.
 - `roaming_monitor/` — Live association-event timeline from `iw event`, timing roams between BSSIDs and decoding 802.11 reason codes.
+- `web_terminal/` — Thin Flask wrapper framing a `ttyd` browser shell, so the Pi's command line is reachable from the same UI as the rest of the suite.
 - `deploy/` — Systemd service units and Nginx reverse proxy configuration.
 - `requirements.txt` — Python dependencies (Flask, Gunicorn).
 
@@ -217,6 +218,45 @@ Project Root Structure:
 - **System Privilege Requirement**: Executes `sudo iw event -t`, covered by the **existing** `iw` sudoers
   rule already required by `wifi_utilization_monitor` — no new privilege to configure.
 
+### I. Web Terminal (`web_terminal`)
+- **Purpose**: Puts an interactive shell on the Pi in the same browser UI as everything else, for the
+  commands the purpose-built apps don't cover — inspecting logs, running one-off `iw`/`ip` invocations,
+  editing a config — without switching to an SSH client.
+- **Architecture — the app owns no terminal logic**: the requirement was to use an off-the-shelf emulator,
+  not write one. [`ttyd`](https://github.com/tsl0922/ttyd) runs as a separate daemon on
+  `127.0.0.1:5009`, embedding xterm.js and handling PTY allocation, VT/ANSI emulation, resize, reconnect,
+  binary safety and flow control. `web_terminal/app.py` renders the shared header around an
+  `<iframe src="tty/">` and exposes `GET /api/status`, a 0.5s TCP probe of that port. It shells out to
+  nothing and needs no privileges — which is also why its test module has no subprocess to mock.
+- **Why not a hand-rolled emulator**: `flask-sock` + stdlib `pty` was the runner-up (pip-only install, no
+  iframe) but moves every PTY edge case in-house: controlling-terminal setup via `pty.fork()`, incremental
+  UTF-8 decoding across read boundaries, zombie reaping, and a thread budget for long-lived sockets.
+  `terminado` (Jupyter's) is well proven but Tornado-based — a second web framework for one screen.
+  `pyte`, the established *pure-Python* emulator, is the wrong layer entirely: it maintains a server-side
+  screen buffer, so using it would mean pushing full screen frames and writing a bespoke JS renderer,
+  losing local echo, scrollback and selection. Its real use is screen-scraping TUIs.
+- **ttyd flags are load-bearing** (`deploy/ttyd.service`): `--writable` is mandatory since ttyd is
+  **read-only by default** and silently accepts no keystrokes without it; `--base-path /terminal/tty`
+  makes ttyd emit URLs correct for the subpath, without which the frame loads but the WebSocket connects
+  to the wrong path and hangs blank; `--interface lo` keeps port 5009 off the LAN so Nginx is the only
+  route in; `-t theme=...` themes the embedded xterm.js to the WiFiPi palette so the frame doesn't read
+  as pasted in.
+- **Nginx**: two locations, with `/terminal/tty/` winning on longest-prefix over `/terminal/`. Its
+  `proxy_pass` deliberately has **no URI part**, so the path reaches ttyd unmodified and matches
+  `--base-path`. Needs the `$connection_upgrade` map from `deploy/nginx-websocket-map.conf.example`,
+  which must go in `/etc/nginx/conf.d/` because `map` is only valid in `http` context while the site
+  config is a bare `server { }` block. `proxy_read_timeout 86400` stops idle sessions being dropped.
+- **Installation**: `ttyd` is **not packaged in Debian bookworm or trixie** (only sid), so it is installed
+  manually from upstream's static release binary — see `README.md`. Do not change this to
+  `apt install ttyd`.
+- **System Privilege Requirement — none, and deliberately less than its siblings**: this is the only app
+  whose units set a non-root `User=`. Both units default to `pi` under a marked block at the top of their
+  `[Service]` section and must be changed together, since modern Raspberry Pi OS images have no `pi`
+  account. The value is edited in place because systemd does not expand environment variables in `User=`. A browser shell is a categorically wider surface than the constrained
+  `sudo nmcli` / `sudo nmap` the other apps expose, so the session is unprivileged and `sudo` inside it
+  prompts for a password. Note this is a blast-radius reduction, **not** an authentication boundary:
+  the app has no auth, so it belongs on an isolated chamber network only.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -252,6 +292,8 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Client Simulator worker: bound to `0.0.0.0:5005` (1 worker, multi-threaded for SSE streaming; runs as root by default since it needs `ip`/`iptables`/`sysctl`).
    - Network Device Scanner worker: bound to `0.0.0.0:5006` (1 worker; `sudo -n nmap` needs a sudoers rule since this app runs as the app user, not root).
    - WiFi Roaming Monitor worker: bound to `0.0.0.0:5007` (1 worker, multi-threaded for SSE streaming; reuses the existing `iw` sudoers rule).
+   - Web Terminal wrapper: bound to `0.0.0.0:5008` (1 worker, multi-threaded; runs as `User=pi`, needs no privileges).
+   - `ttyd` backend: bound to `127.0.0.1:5009` only, never the LAN (also `User=pi`; not a Gunicorn app — a standalone daemon installed to `/usr/local/bin/ttyd`).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
@@ -261,6 +303,8 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `client-simulator.service`
    - `network-device-scanner.service`
    - `roaming-monitor.service`
+   - `web-terminal.service`
+   - `ttyd.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
@@ -271,6 +315,8 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/clientsim/`): Proxies to Client Simulator (`127.0.0.1:5005`) with buffering disabled for SSE.
    - Port `80` (Subpath `/devices/`): Proxies to Network Device Scanner (`127.0.0.1:5006`).
    - Port `80` (Subpath `/roaming/`): Proxies to WiFi Roaming Monitor (`127.0.0.1:5007`) with buffering disabled for SSE.
+   - Port `80` (Subpath `/terminal/`): Proxies to the Web Terminal wrapper (`127.0.0.1:5008`).
+   - Port `80` (Subpath `/terminal/tty/`): Proxies to `ttyd` (`127.0.0.1:5009`) with WebSocket upgrade headers, requiring the `$connection_upgrade` map installed to `/etc/nginx/conf.d/`.
 
 ---
 

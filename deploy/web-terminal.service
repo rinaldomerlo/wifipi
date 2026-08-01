@@ -1,0 +1,30 @@
+[Unit]
+Description=WiFiPi Web Terminal Wrapper (Flask / Gunicorn)
+# The wrapper page is useful even if ttyd is down (it explains what to start),
+# so this is only a soft ordering, not a dependency.
+After=network.target ttyd.service
+
+[Service]
+# ============================================================================
+# SET YOUR USERNAME HERE (and in ttyd.service -- both must match).
+#
+# Raspberry Pi OS Bookworm and later no longer create a default 'pi' user, so
+# this almost certainly needs changing to the account you created at imaging
+# time. A non-existent user makes systemd fail with status=217/USER.
+#
+# This has to be edited in place: systemd does not expand environment variables
+# in User=, so it cannot be read from a config file or EnvironmentFile.
+# ============================================================================
+User=pi
+Group=pi
+
+# Unlike the other WiFiPi units this one runs unprivileged. The wrapper itself
+# needs no privileges at all -- it renders a page and TCP-probes ttyd -- and
+# keeping both halves of the terminal as the same non-root user avoids implying
+# the shell is more privileged than it is.
+WorkingDirectory=/opt/wifipi/web_terminal
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 0.0.0.0:5008 --workers 1 --threads 4 --timeout 120 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
