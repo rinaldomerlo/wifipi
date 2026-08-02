@@ -578,6 +578,35 @@
             setRunning(false);
             setStatus('Browsing simulation stopped.', 'var(--color-orange)');
         }
+
+        // The simulation runs in the server process, not in this page, so navigating
+        // away or reloading leaves it running. Ask on load whether one is in progress
+        // and restore the controls and live log if so -- otherwise the page shows an
+        // idle screen while sessions are still fetching pages, and Start is refused.
+        //
+        // Output produced before we attach is gone: output_queue is consumed
+        // destructively and nothing retains it, so the log resumes from the moment of
+        // reattach rather than from the beginning of the run.
+        async function reattach() {
+            try {
+                const res = await fetch('status', { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.running) return;
+
+                setRunning(true);
+                setStatus(
+                    `Reattached to a simulation already in progress (${data.active_sessions} session(s)).`,
+                    'var(--color-green)'
+                );
+                startStream();
+                document.getElementById('output').textContent =
+                    '— reattached to a running simulation; earlier output was not retained —\n';
+            } catch (e) {
+                /* Leave the idle state alone -- a failed probe shouldn't block the UI. */
+            }
+        }
+
+        reattach();
     </script>
 </body>
 </html>

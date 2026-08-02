@@ -40,6 +40,35 @@ class TestWebBrowsingSimulator(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_status_route_reports_idle(self):
+        wb_app_module.active_sessions = 0
+        response = self.client.get('/status')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data['running'])
+        self.assertEqual(data['active_sessions'], 0)
+
+    def test_status_route_reports_running(self):
+        """active_sessions is the same value /start and /stop gate on."""
+        wb_app_module.active_sessions = 3
+        try:
+            response = self.client.get('/status')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertTrue(data['running'])
+            self.assertEqual(data['active_sessions'], 3)
+        finally:
+            wb_app_module.active_sessions = 0
+
+    def test_index_reattaches_to_running_simulation_on_load(self):
+        """
+        The simulation outlives the page, so a reload must probe /status and
+        restore the running UI rather than showing an idle screen.
+        """
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('function reattach()', html)
+        self.assertIn('reattach();', html)
+
     def test_api_hostname_route(self):
         response = self.client.get('/api/hostname')
         self.assertEqual(response.status_code, 200)

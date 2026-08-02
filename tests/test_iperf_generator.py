@@ -11,8 +11,30 @@ if 'app' in sys.modules:
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import itertools
+from collections import deque
+
 import iperf_congestion_generator.app as gen_app_module
 gen_app = gen_app_module.app
+
+
+def reset_module_state():
+    """Tests share one imported module, so the registry must not leak between them."""
+    gen_app_module.tests.clear()
+    gen_app_module._test_id_counter = itertools.count(1)
+
+
+def make_test(**overrides):
+    """Register a test record directly, without spawning iperf3."""
+    config = {
+        "server_ip": "192.168.1.100",
+        "server_port": 5201,
+        "bind_interface": "wlan0",
+        "duration_minutes": 5,
+        "bandwidth_mbps": "",
+    }
+    config.update(overrides)
+    return gen_app_module._new_test(config)
 
 
 class TestIPerfCongestionGenerator(unittest.TestCase):
@@ -20,6 +42,7 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
     def setUp(self):
         gen_app.config['TESTING'] = True
         self.client = gen_app.test_client()
+        reset_module_state()
 
     def test_index_route(self):
         response = self.client.get('/')
@@ -68,9 +91,10 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['status'], 'started')
         mock_thread.assert_called_once()
+        # args[0] is now the test record; the connection details follow it.
         args = mock_thread.call_args[1]['args']
-        self.assertEqual(args[0], "192.168.1.100")
-        self.assertEqual(args[1], 5202)
+        self.assertEqual(args[1], "192.168.1.100")
+        self.assertEqual(args[2], 5202)
 
         # Case 2: IP:Port string in server_ip
         mock_thread.reset_mock()
@@ -81,8 +105,8 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         mock_thread.assert_called_once()
         args = mock_thread.call_args[1]['args']
-        self.assertEqual(args[0], "192.168.1.100")
-        self.assertEqual(args[1], 5204)
+        self.assertEqual(args[1], "192.168.1.100")
+        self.assertEqual(args[2], 5204)
 
     @patch('iperf_congestion_generator.app.shutil.which')
     @patch('iperf_congestion_generator.app.subprocess.run')
@@ -126,6 +150,112 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         response = self.client.post('/stop')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['status'], 'no test running')
+
+
+class TestConcurrentTestRegistry(unittest.TestCase):
+    """Several tests run at once, so state is a registry rather than one global."""
+
+    def setUp(self):
+        gen_app.config['TESTING'] = True
+        self.client = gen_app.test_client()
+        reset_module_state()
+
+    @patch('iperf_congestion_generator.app.threading.Thread')
+    def test_start_allows_concurrent_tests(self, mock_thread):
+        """The old single-test 409 guard is gone -- concurrency is the point."""
+        ids = []
+        for port in (5201, 5202, 5203):
+            res = self.client.post('/start', json={"server_ip": "192.168.1.100", "server_port": port})
+            self.assertEqual(res.status_code, 200)
+            ids.append(res.get_json()['test_id'])
+
+        self.assertEqual(len(set(ids)), 3)
+        listed = self.client.get('/tests').get_json()['tests']
+        self.assertEqual(len(listed), 3)
+        self.assertEqual([t['server_port'] for t in listed], [5201, 5202, 5203])
+
+    @patch('iperf_congestion_generator.app.threading.Thread')
+    def test_start_refuses_past_concurrency_cap(self, mock_thread):
+        for _ in range(gen_app_module.MAX_CONCURRENT_TESTS):
+            self.assertEqual(
+                self.client.post('/start', json={"server_ip": "192.168.1.100"}).status_code, 200)
+
+        res = self.client.post('/start', json={"server_ip": "192.168.1.100"})
+        self.assertEqual(res.status_code, 409)
+        self.assertIn('limit', res.get_json()['error'])
+
+    def test_tests_route_reports_running_state(self):
+        """A reloaded page rebuilds its tabs from here rather than assuming idle."""
+        t = make_test(server_port=5202)
+        data = self.client.get('/tests').get_json()
+        self.assertEqual(data['max_concurrent'], gen_app_module.MAX_CONCURRENT_TESTS)
+        self.assertEqual(len(data['tests']), 1)
+        self.assertEqual(data['tests'][0]['id'], t['id'])
+        self.assertEqual(data['tests'][0]['status'], 'running')
+        self.assertEqual(data['tests'][0]['server_port'], 5202)
+
+    def test_output_replays_from_cursor(self):
+        t = make_test()
+        for i in range(5):
+            gen_app_module._emit(t, f"line {i}")
+
+        first = self.client.get(f"/tests/{t['id']}/output?since=0").get_json()
+        self.assertEqual(first['lines'], [f"line {i}" for i in range(5)])
+        self.assertEqual(first['next'], 5)
+        self.assertEqual(first['dropped'], 0)
+
+        # A caught-up client gets nothing new, and the cursor holds steady.
+        second = self.client.get(f"/tests/{t['id']}/output?since={first['next']}").get_json()
+        self.assertEqual(second['lines'], [])
+        self.assertEqual(second['next'], 5)
+
+    def test_output_reports_dropped_lines_when_buffer_wraps(self):
+        """total_lines keeps counting past what the ring buffer retains, so a
+        client that falls behind is told rather than silently skipped."""
+        t = make_test()
+        t['lines'] = deque(maxlen=3)
+        for i in range(10):
+            gen_app_module._emit(t, f"line {i}")
+
+        data = self.client.get(f"/tests/{t['id']}/output?since=0").get_json()
+        self.assertEqual(data['lines'], ['line 7', 'line 8', 'line 9'])
+        self.assertEqual(data['next'], 10)
+        self.assertEqual(data['dropped'], 7)
+
+    def test_output_unknown_test_404s(self):
+        self.assertEqual(self.client.get('/tests/nope/output').status_code, 404)
+
+    def test_stop_one_marks_only_that_test(self):
+        a, b = make_test(server_port=5201), make_test(server_port=5202)
+        a['process'] = MagicMock()
+
+        res = self.client.post(f"/tests/{a['id']}/stop")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(a['stop_requested'])
+        self.assertFalse(b['stop_requested'])
+        a['process'].terminate.assert_called_once()
+
+    def test_stop_all_marks_every_running_test(self):
+        a, b = make_test(), make_test()
+        res = self.client.post('/stop')
+        self.assertEqual(res.get_json()['count'], 2)
+        self.assertTrue(a['stop_requested'])
+        self.assertTrue(b['stop_requested'])
+
+    def test_forget_removes_finished_test_only(self):
+        t = make_test()
+        self.assertEqual(self.client.delete(f"/tests/{t['id']}").status_code, 409)
+
+        t['status'] = 'finished'
+        self.assertEqual(self.client.delete(f"/tests/{t['id']}").status_code, 200)
+        self.assertNotIn(t['id'], gen_app_module.tests)
+
+    def test_index_rebuilds_tabs_on_load(self):
+        """The reattach: the page has no state of its own, it asks the server."""
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('refreshTests', html)
+        self.assertIn('tab-title', html)
+        self.assertNotIn('EventSource', html)
 
 
 if __name__ == '__main__':

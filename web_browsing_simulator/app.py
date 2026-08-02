@@ -338,6 +338,20 @@ def start():
     return jsonify({"status": "started", "sessions": intensity})
 
 
+@app.route("/status")
+def status():
+    """
+    Report whether a simulation is currently running, and how many concurrent
+    browsing sessions are live.
+
+    The simulation lives in this process, not in the browser page, so a reloaded
+    or reopened page needs to ask rather than assume it is idle. `active_sessions`
+    is the same value /start and /stop already gate on.
+    """
+    with test_lock:
+        return jsonify({"running": active_sessions > 0, "active_sessions": active_sessions})
+
+
 @app.route("/stop", methods=["POST"])
 def stop():
     with test_lock:

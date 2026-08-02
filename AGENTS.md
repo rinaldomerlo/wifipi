@@ -15,7 +15,7 @@ This document summarizes the architecture, key components, design standards, and
 Project Root Structure:
 - `www/` — Default static landing webpage (`index.html`).
 - `wifi_utilization_monitor/` — Real-time WiFi channel utilization and spectrum analyzer.
-- `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams.
+- `iperf_congestion_generator/` — Browser-based controller for long-running `iperf3` test streams; runs several at once, each with its own tab and output buffer.
 - `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
 - `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
 - `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
@@ -309,7 +309,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
-   - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`) with buffering disabled (`proxy_buffering off`, `chunked_transfer_encoding on`) for real-time SSE streaming.
+   - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`). No longer uses SSE — output is polled from per-test ring buffers — so the buffering directives there are vestigial and harmless.
    - Port `80` (Subpath `/iperfserver/`): Proxies to iPerf Server Manager (`127.0.0.1:5002`).
    - Port `80` (Subpath `/wificonnect/`): Proxies to WiFi Connection Manager (`127.0.0.1:5003`).
    - Port `80` (Subpath `/webbrowse/`): Proxies to Web Browsing Simulator (`127.0.0.1:5004`) with buffering disabled for SSE, except `/webbrowse/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/web_browsing_simulator/content/`.

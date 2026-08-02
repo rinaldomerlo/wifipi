@@ -12,7 +12,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | Path | What it is |
 | --- | --- |
 | `wifi_utilization_monitor/` | Flask app — live WiFi channel/spectrum monitor (2.4/5/6 GHz). Port 5000, proxied at `/wifimon/`. |
-| `iperf_congestion_generator/` | Flask app — starts/stops `iperf3` client streams, streams output over SSE. Port 5001, proxied at `/iperf/`. |
+| `iperf_congestion_generator/` | Flask app — runs several concurrent `iperf3` client tests, one tab each, output polled from per-test ring buffers. Port 5001, proxied at `/iperf/`. |
 | `iperf_server_manager/` | Flask app — discovers and controls `iperf3` server daemons and systemd units. Port 5002, proxied at `/iperfserver/`. |
 | `wifi_connection_manager/` | Flask app — scans/connects/disconnects WiFi via `nmcli` (NetworkManager). Port 5003, proxied at `/wificonnect/`. |
 | `web_browsing_simulator/` | Flask app — simulates bursty web-browsing traffic against another Pi's synthetic page corpus. Port 5004, proxied at `/webbrowse/`. |
