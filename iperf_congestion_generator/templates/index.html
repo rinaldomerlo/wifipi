@@ -530,7 +530,7 @@
                  pane shows whichever is selected rather than a single stream. -->
             <div class="tabs-header">
                 <div class="tabs-titles" id="test-tabs">
-                    <span class="tabs-empty" id="tabs-empty">No tests yet</span>
+                    <span class="tabs-empty">No tests yet</span>
                 </div>
                 <button class="btn-ghost" id="btn-clear-finished" onclick="clearFinished()" style="display:none;">
                     <i class="fa-solid fa-broom"></i> Clear finished
@@ -637,8 +637,11 @@
                     setStatus('Error: ' + data.error, 'var(--color-pink)');
                     return;
                 }
-                // Focus the tab for the test just started.
+                // Focus the tab for the test just started, resetting the pane so
+                // its output doesn't append below the previously viewed test's.
                 selectedId = data.test_id;
+                cursors[selectedId] = 0;
+                document.getElementById('output').textContent = '';
             } catch (e) {
                 setStatus('Failed to start: ' + e, 'var(--color-pink)');
                 return;
@@ -662,16 +665,17 @@
 
         function renderTabs() {
             const strip = document.getElementById('test-tabs');
-            const empty = document.getElementById('tabs-empty');
+            const clearBtn = document.getElementById('btn-clear-finished');
 
+            // The empty state is rendered as part of this string rather than kept
+            // as a separate element: writing innerHTML below would destroy such an
+            // element, and the next call would then throw on a null reference and
+            // silently stop updating the strip.
             if (!knownTests.length) {
-                strip.innerHTML = '';
-                strip.appendChild(empty);
-                empty.style.display = '';
-                document.getElementById('btn-clear-finished').style.display = 'none';
+                strip.innerHTML = '<span class="tabs-empty">No tests yet</span>';
+                clearBtn.style.display = 'none';
                 return;
             }
-            empty.style.display = 'none';
 
             strip.innerHTML = knownTests.map(t => {
                 const dot = t.status === 'running' ? 'running' : (t.status === 'error' ? 'error' : '');
@@ -685,7 +689,7 @@
                         </button>`;
             }).join('');
 
-            document.getElementById('btn-clear-finished').style.display =
+            clearBtn.style.display =
                 knownTests.some(t => t.status !== 'running') ? '' : 'none';
         }
 
