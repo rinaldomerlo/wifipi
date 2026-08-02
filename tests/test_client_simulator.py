@@ -44,6 +44,16 @@ class TestClientSimulator(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_index_reattaches_to_running_simulation_on_load(self):
+        """
+        The simulation outlives the page, so a reload must probe /status and
+        restore the running UI rather than showing an idle screen while clients
+        are still generating traffic.
+        """
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('function reattach()', html)
+        self.assertIn('reattach();', html)
+
     def test_api_hostname_route(self):
         response = self.client.get('/api/hostname')
         self.assertEqual(response.status_code, 200)

@@ -595,6 +595,37 @@
             setRunning(false);
             setStatus('Simulation stopped.', 'var(--color-orange)');
         }
+
+        // The simulation runs in the server process, not in this page, so navigating
+        // away or reloading leaves it running. Ask on load whether one is in progress
+        // and restore the controls, stats and live log if so -- otherwise the page
+        // shows an idle screen while clients are still generating traffic, and Start
+        // just returns 409.
+        //
+        // Output produced before we attach is gone: output_queue is consumed
+        // destructively and nothing retains it, so the log necessarily resumes from
+        // the moment of reattach rather than from the beginning.
+        async function reattach() {
+            try {
+                const res = await fetch('status', { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.running) return;
+
+                setRunning(true);
+                setStatus('Reattached to a simulation already in progress.', 'var(--color-green)');
+                startStream();
+                document.getElementById('output').textContent =
+                    '— reattached to a running simulation; earlier output was not retained —\n';
+
+                if (statusTimer) clearInterval(statusTimer);
+                statusTimer = setInterval(pollStatus, 2000);
+                pollStatus();
+            } catch (e) {
+                /* Leave the idle state alone -- a failed probe shouldn't block the UI. */
+            }
+        }
+
+        reattach();
     </script>
 </body>
 </html>
