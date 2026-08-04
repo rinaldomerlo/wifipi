@@ -183,6 +183,21 @@
             border-radius: 4px;
             margin-left: 0.5rem;
         }
+
+        /* Release version badge — single source of truth for the displayed version */
+        .version-badge {
+            display: inline-block;
+            margin-top: 0.65rem;
+            margin-left: 0.5rem;
+            font-family: monospace;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-color);
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -194,6 +209,7 @@
             <span class="host-badge" title="Host serving this page">
                 Host: <strong id="hostName"><!--# echo var="hostname" default="" --></strong>
             </span>
+            <span class="version-badge" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2<!--/VERSION--></span>
         </header>
 
         <div class="section-label">Monitoring &amp; Management</div>
@@ -319,6 +335,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/porcupine/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">WiFi Porcupine <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/porcupine/</span>
+                    </div>
+                    <p class="card-desc">Stress an AP by rapidly associating and disassociating several WiFi interfaces at once, randomizing each interface's MAC on every reconnect so the hub sees a storm of brand-new stations.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <footer>
@@ -350,7 +379,8 @@
                 '/clientsim/api/hostname',
                 '/devices/api/hostname',
                 '/roaming/api/hostname',
-                '/terminal/api/hostname'
+                '/terminal/api/hostname',
+                '/porcupine/api/hostname'
             ];
 
             (function tryNext(i) {

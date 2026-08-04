@@ -24,7 +24,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based live timeline of association events (`iw event`) for a chosen wireless interface: authentication, association, connection, deauthentication and disconnection, each timestamped from the kernel and streamed to the browser. Measures how long a roam between two BSSIDs actually took — including 802.11r fast transitions that skip the disconnect entirely — and decodes 802.11 reason codes so a drop reports "4-Way Handshake timeout" rather than "reason 15". Intended for chamber testing where a variable attenuator is used to force transitions between APs.
 9. **Web Terminal (`web_terminal`)**  
    A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as a non-root user. Requires a one-off manual install of `ttyd` (see below).
-10. **Default Landing Webpage (`www`)**  
+10. **WiFi Porcupine (`wifi_porcupine`)**  
+   A browser-based tool that stresses an access point by rapidly and randomly associating and disassociating several physical WiFi interfaces (the Pi's built-in radio plus USB adapters) against one target SSID, randomizing each interface's MAC on every reconnect (via NetworkManager's `cloned-mac-address`) so the hub sees a constant stream of brand-new stations — bloating its association, DHCP-lease and ARP tables. A single intensity slider scales both churn speed (dwell time) and concurrency (how many interfaces churn at once). Optionally, each interface can also carry a small fleet of `ip netns` clients NAT'd out through it to add real HTTP traffic load — though those clients ride the interface's single radio MAC and so are not seen by the AP as separate associations. Refuses gracefully off-Linux or without NetworkManager (e.g. macOS development).
+11. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -122,6 +124,7 @@ sudo cp deploy/network-device-scanner.service /etc/systemd/system/
 sudo cp deploy/roaming-monitor.service /etc/systemd/system/
 sudo cp deploy/web-terminal.service /etc/systemd/system/
 sudo cp deploy/ttyd.service /etc/systemd/system/
+sudo cp deploy/wifi-porcupine.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -155,6 +158,7 @@ sudo systemctl enable --now network-device-scanner
 sudo systemctl enable --now roaming-monitor
 sudo systemctl enable --now ttyd
 sudo systemctl enable --now web-terminal
+sudo systemctl enable --now wifi-porcupine
 ```
 
 Verify service status:
@@ -169,6 +173,7 @@ sudo systemctl status network-device-scanner
 sudo systemctl status roaming-monitor
 sudo systemctl status ttyd
 sudo systemctl status web-terminal
+sudo systemctl status wifi-porcupine
 ```
 
 #### Multi-Port iPerf3 Server Services (Optional)
@@ -187,7 +192,7 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, `/roaming/`, and `/terminal/` to the respective backend Flask apps.
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, `/roaming/`, `/terminal/`, and `/porcupine/` to the respective backend Flask apps.
 
 For `/webbrowse/` specifically, Nginx also serves the app's generated synthetic content directly as
 static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
@@ -245,3 +250,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **Network Device Scanner**: Open `http://<pi-ip>/devices/` (Subpath `/devices/` reverse-proxied to Gunicorn on port 5006)
 - **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)
 - **Web Terminal**: Open `http://<pi-ip>/terminal/` (Subpath `/terminal/` reverse-proxied to Gunicorn on port 5008, with `/terminal/tty/` reverse-proxied to the loopback-bound `ttyd` on port 5009)
+- **WiFi Porcupine**: Open `http://<pi-ip>/porcupine/` (Subpath `/porcupine/` reverse-proxied to Gunicorn on port 5010)

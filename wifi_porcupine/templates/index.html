@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /porcupine to /porcupine/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Porcupine</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-glow: 0 0 15px rgba(0, 210, 255, 0.25);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            padding: 1.5rem;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i {
+            color: var(--color-blue);
+        }
+
+        .host-badge strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border-color: var(--glass-border-hover);
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+            margin-top: 1.2rem;
+        }
+
+        label.first {
+            margin-top: 0;
+        }
+
+        label i {
+            margin-right: 4px;
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.95rem;
+            font-weight: 500;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        input[type="range"] {
+            flex: 1;
+            width: auto;
+            padding: 0;
+            accent-color: var(--color-blue);
+            background: transparent;
+        }
+
+        .row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0 1.5rem;
+        }
+
+        .grid-2 > div {
+            min-width: 0;
+        }
+
+        .hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.35rem;
+        }
+
+        /* Interface checkbox list */
+        .iface-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            max-height: 190px;
+            overflow-y: auto;
+        }
+
+        .iface-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem 0.85rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .iface-item:hover {
+            border-color: var(--glass-border-hover);
+        }
+
+        .iface-item input[type="checkbox"] {
+            width: auto;
+            accent-color: var(--color-blue);
+            transform: scale(1.2);
+        }
+
+        .iface-item .iface-name {
+            font-family: var(--font-heading);
+            color: var(--color-blue);
+        }
+
+        /* netns toggle switch */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1.2rem;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input { display: none; }
+
+        .toggle-knob {
+            position: absolute;
+            inset: 0;
+            border-radius: 50px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--glass-border);
+            transition: all 0.25s ease;
+            cursor: pointer;
+        }
+
+        .toggle-knob::before {
+            content: "";
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: 3px;
+            top: 3px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: all 0.25s ease;
+        }
+
+        .toggle-switch input:checked + .toggle-knob {
+            background: rgba(0, 210, 255, 0.3);
+            border-color: var(--color-blue);
+        }
+
+        .toggle-switch input:checked + .toggle-knob::before {
+            transform: translateX(22px);
+            background: var(--color-blue);
+        }
+
+        .toggle-switch input:disabled + .toggle-knob {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        #netns-extra.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.7rem 1.4rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        #btn-start {
+            background: linear-gradient(135deg, #00e676 0%, #00c853 100%);
+            color: #08090f;
+            box-shadow: 0 4px 15px rgba(0, 230, 118, 0.25);
+        }
+
+        #btn-start:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 230, 118, 0.4);
+        }
+
+        #btn-stop {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(255, 59, 116, 0.25);
+        }
+
+        #btn-stop:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 59, 116, 0.4);
+        }
+
+        #status-msg {
+            font-size: 0.85rem;
+            color: var(--color-orange);
+            margin-top: 0.75rem;
+            min-height: 1.2em;
+            font-weight: 500;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .stat-tile {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 1rem 1.1rem;
+        }
+
+        .stat-tile .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.35rem;
+        }
+
+        .stat-tile .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-tile.mode .stat-value {
+            font-size: 1.05rem;
+            color: var(--color-blue);
+        }
+
+        #output {
+            background: rgba(8, 9, 15, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            height: 380px;
+            overflow-y: auto;
+            color: var(--color-green);
+        }
+
+        .caveat {
+            font-size: 0.8rem;
+            color: var(--color-orange);
+            background: rgba(255, 145, 0, 0.08);
+            border: 1px solid rgba(255, 145, 0, 0.25);
+            border-radius: 10px;
+            padding: 0.7rem 0.9rem;
+            margin-top: 1rem;
+            line-height: 1.45;
+        }
+
+        .caveat i { margin-right: 5px; }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(8, 9, 15, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+        @media (max-width: 640px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-tower-broadcast logo-icon"></i>
+                <div class="logo-text">
+                    <h1>WiFi <span>Porcupine</span></h1>
+                    <span class="subtitle">Multi-Interface Association &amp; MAC Churn Stressor</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <div class="glass-card">
+            <div class="grid-2">
+                <div>
+                    <label class="first"><i class="fa-solid fa-wifi"></i> WiFi Interfaces (spines)</label>
+                    <div class="iface-list" id="iface-list">
+                        <div class="hint">Detecting interfaces…</div>
+                    </div>
+                    <div class="hint">Each selected interface associates, holds briefly, then disconnects and reconnects with a fresh random MAC — a new station to the AP every cycle.</div>
+
+                    <label for="intensity"><i class="fa-solid fa-gauge-high"></i> Intensity</label>
+                    <div class="row" style="gap: 1rem;">
+                        <input id="intensity" type="range" min="{{ intensity_min }}" max="{{ intensity_max }}" value="{{ intensity_default }}" oninput="updateIntensityLabel()">
+                        <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 2.5em; text-align: right;">{{ intensity_default }}</span>
+                    </div>
+                    <div class="hint">Scales both churn speed (shorter dwell between reconnects) and concurrency (how many interfaces churn at once).</div>
+
+                    <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
+                    <input id="duration" type="number" value="60" min="1">
+                </div>
+                <div>
+                    <label class="first" for="ssid"><i class="fa-solid fa-tower-cell"></i> Target SSID</label>
+                    <input id="ssid" type="text" placeholder="The AP under test">
+
+                    <label for="password"><i class="fa-solid fa-key"></i> Password</label>
+                    <input id="password" type="password" placeholder="Leave blank for an open network">
+
+                    <div class="toggle-row">
+                        <label style="margin: 0;"><i class="fa-solid fa-users-line"></i> netns Traffic Multiplier</label>
+                        <span class="toggle-switch">
+                            <input type="checkbox" id="netns-enabled" onchange="updateNetns()">
+                            <span class="toggle-knob"></span>
+                        </span>
+                    </div>
+                    <div class="hint" id="netns-hint">Optional: run extra namespace clients behind each interface to add real traffic load.</div>
+
+                    <div id="netns-extra" class="disabled">
+                        <label for="netns-per"><i class="fa-solid fa-user-group"></i> Clients per interface</label>
+                        <input id="netns-per" type="number" value="{{ netns_default }}" min="{{ netns_min }}" max="{{ netns_max }}">
+
+                        <label for="target-url"><i class="fa-solid fa-globe"></i> Target URL (HTTP)</label>
+                        <input id="target-url" type="text" placeholder="http://192.168.1.1/">
+                    </div>
+                </div>
+            </div>
+
+            <div class="caveat">
+                <i class="fa-solid fa-circle-info"></i>
+                Only the physical-interface association/MAC churn stresses the AP's association tables.
+                netns clients NAT out through their interface's single radio MAC, so they add traffic load
+                but are invisible to the AP as separate associations — over WiFi you can't put multiple MACs
+                onto one station link.
+            </div>
+
+            <div class="actions">
+                <button id="btn-start" class="btn" onclick="startRun()"><i class="fa-solid fa-play"></i> Start Stressing</button>
+                <button id="btn-stop" class="btn" onclick="stopRun()" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+            </div>
+            <div id="status-msg"></div>
+        </div>
+
+        <div class="glass-card">
+            <div class="stats-grid">
+                <div class="stat-tile mode">
+                    <div class="stat-label">Mode</div>
+                    <div class="stat-value" id="stat-mode">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Associated Now</div>
+                    <div class="stat-value" id="stat-active">0</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Reconnects</div>
+                    <div class="stat-value" id="stat-reconnects">0</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">netns Clients</div>
+                    <div class="stat-value" id="stat-clients">0</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Requests</div>
+                    <div class="stat-value" id="stat-requests">0</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Errors</div>
+                    <div class="stat-value" id="stat-errors">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <label class="first" style="margin-bottom: 0.75rem;"><i class="fa-solid fa-terminal"></i> Live Activity</label>
+            <div id="output">Activity will appear here once the run starts…</div>
+        </div>
+    </div>
+
+    <script>
+        let statusTimer = null;
+        let outputCursor = 0;
+
+        function setStatus(msg, color) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.style.color = color || 'var(--color-orange)';
+        }
+
+        function setRunning(running) {
+            document.getElementById('btn-start').disabled = running;
+            document.getElementById('btn-stop').disabled = !running;
+        }
+
+        function updateIntensityLabel() {
+            document.getElementById('intensity-value').textContent = document.getElementById('intensity').value;
+        }
+
+        let netnsSupported = false;
+        let netnsReason = '';
+
+        function updateNetns() {
+            const cb = document.getElementById('netns-enabled');
+            document.getElementById('netns-extra').classList.toggle('disabled', !cb.checked);
+        }
+
+        async function loadInterfaces() {
+            const list = document.getElementById('iface-list');
+            try {
+                const res = await fetch('api/interfaces', { cache: 'no-store' });
+                const data = await res.json();
+                netnsSupported = !!data.netns_supported;
+                netnsReason = data.netns_reason || '';
+
+                const cb = document.getElementById('netns-enabled');
+                if (!netnsSupported) {
+                    cb.checked = false;
+                    cb.disabled = true;
+                    updateNetns();
+                    document.getElementById('netns-hint').textContent =
+                        'Unavailable here: ' + (netnsReason || 'namespaces not supported') + '.';
+                }
+
+                if (!data.interfaces || data.interfaces.length === 0) {
+                    const reason = data.wifi_supported ? 'No WiFi interfaces detected.'
+                        : ('WiFi churn unavailable: ' + (data.wifi_reason || 'unsupported') + '.');
+                    list.innerHTML = '<div class="hint">' + reason + '</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                data.interfaces.forEach((iface) => {
+                    const label = document.createElement('label');
+                    label.className = 'iface-item';
+                    label.innerHTML =
+                        '<input type="checkbox" class="iface-cb" value="' + iface + '">' +
+                        '<span class="iface-name">' + iface + '</span>';
+                    list.appendChild(label);
+                });
+            } catch (e) {
+                list.innerHTML = '<div class="hint">Failed to load interfaces.</div>';
+            }
+        }
+
+        function selectedInterfaces() {
+            return Array.from(document.querySelectorAll('.iface-cb'))
+                .filter((c) => c.checked)
+                .map((c) => c.value);
+        }
+
+        async function pollStatus() {
+            try {
+                const res = await fetch('api/status', { cache: 'no-store' });
+                const data = await res.json();
+                document.getElementById('stat-mode').textContent =
+                    data.running ? (data.netns_mode === 'netns' ? 'LIVE + NETNS' : 'LIVE') : '—';
+                document.getElementById('stat-active').textContent = data.active_interfaces ?? 0;
+                document.getElementById('stat-reconnects').textContent = data.reconnects ?? 0;
+                document.getElementById('stat-clients').textContent = data.netns_clients ?? 0;
+                document.getElementById('stat-requests').textContent = data.requests ?? 0;
+                document.getElementById('stat-errors').textContent = data.errors ?? 0;
+                if (!data.running && statusTimer) {
+                    clearInterval(statusTimer);
+                    statusTimer = null;
+                    setRunning(false);
+                    setStatus('Run finished.', 'var(--color-green)');
+                }
+            } catch (e) { /* ignore transient poll failures */ }
+        }
+
+        async function pollOutput() {
+            try {
+                const res = await fetch('api/output?since=' + outputCursor, { cache: 'no-store' });
+                const data = await res.json();
+                const out = document.getElementById('output');
+                if (data.dropped > 0) {
+                    out.textContent += '… (' + data.dropped + ' earlier line(s) dropped) …\n';
+                }
+                if (data.lines && data.lines.length) {
+                    out.textContent += data.lines.join('\n') + '\n';
+                    out.scrollTop = out.scrollHeight;
+                }
+                outputCursor = data.next;
+            } catch (e) { /* ignore transient poll failures */ }
+        }
+
+        function startPolling() {
+            if (statusTimer) clearInterval(statusTimer);
+            statusTimer = setInterval(() => { pollStatus(); pollOutput(); }, 2000);
+            pollStatus();
+            pollOutput();
+        }
+
+        async function startRun() {
+            const interfaces = selectedInterfaces();
+            if (interfaces.length === 0) {
+                setStatus('Select at least one WiFi interface.', 'var(--color-pink)');
+                return;
+            }
+            const ssid = document.getElementById('ssid').value.trim();
+            if (!ssid) {
+                setStatus('Target SSID is required.', 'var(--color-pink)');
+                return;
+            }
+            const payload = {
+                interfaces: interfaces,
+                ssid: ssid,
+                password: document.getElementById('password').value,
+                intensity: parseInt(document.getElementById('intensity').value) || {{ intensity_default }},
+                duration_minutes: parseInt(document.getElementById('duration').value) || 60,
+                netns_enabled: document.getElementById('netns-enabled').checked,
+                netns_per_iface: parseInt(document.getElementById('netns-per').value) || {{ netns_default }},
+                target_url: document.getElementById('target-url').value.trim(),
+            };
+
+            document.getElementById('output').textContent = '';
+            outputCursor = 0;
+            setRunning(true);
+            setStatus('Starting run…', 'var(--color-blue)');
+
+            try {
+                const res = await fetch('api/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus('Error: ' + data.error, 'var(--color-pink)');
+                    setRunning(false);
+                    return;
+                }
+            } catch (e) {
+                setStatus('Failed to start: ' + e, 'var(--color-pink)');
+                setRunning(false);
+                return;
+            }
+
+            setStatus('Run in progress…', 'var(--color-green)');
+            startPolling();
+        }
+
+        async function stopRun() {
+            setStatus('Stopping…', 'var(--color-orange)');
+            try {
+                await fetch('api/stop', { method: 'POST' });
+            } catch (e) { /* ignore */ }
+            setRunning(false);
+            setStatus('Run stopped.', 'var(--color-orange)');
+            pollStatus();
+            pollOutput();
+        }
+
+        // The run lives in the server process, not in this page, so navigating away
+        // or reloading leaves it running. Probe on load and reattach to a run already
+        // in progress, replaying the log from the buffer cursor (nothing is lost since
+        // the log is a ring buffer, not a destructive stream).
+        async function reattach() {
+            try {
+                const res = await fetch('api/status', { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.running) return;
+                setRunning(true);
+                setStatus('Reattached to a run already in progress.', 'var(--color-green)');
+                document.getElementById('output').textContent = '';
+                outputCursor = 0;
+                startPolling();
+            } catch (e) { /* leave idle state alone on a failed probe */ }
+        }
+
+        loadInterfaces();
+        reattach();
+    </script>
+</body>
+</html>

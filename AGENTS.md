@@ -258,6 +258,37 @@ Project Root Structure:
   on images where the primary group differs. The app has no authentication of its own; `ttyd`'s
   `--credential user:password` is available if it's ever wanted.
 
+### J. WiFi Porcupine (`wifi_porcupine`)
+- **Purpose**: Stress an AP's *association* side — the tables the other generators never touch. It enlists
+  several physical WiFi interfaces (the built-in radio plus USB adapters) and rapidly, randomly associates
+  and disassociates each against one target SSID, randomizing the interface's MAC on every reconnect so the
+  hub sees a constant stream of brand-new stations bloating its association / DHCP-lease / ARP tables. Each
+  interface is a "spine" repeatedly poking the AP.
+- **Association/MAC churn**: one NetworkManager profile per interface (`porcupine-<iface>`) created with
+  `802-11-wireless.cloned-mac-address random`, so every `nmcli connection up` picks a fresh random MAC.
+  A per-interface daemon thread loops connect → dwell → disconnect → gap; the new MAC is read back from
+  `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
+- **Intensity**: a single slider (1–10) scales *both* dwell time (interpolated high→short:
+  `compute_dwell_range`) and concurrency (`compute_concurrency` — how many enlisted interfaces churn at
+  once). A supervisor thread reshuffles the active random subset every `RESHUFFLE_INTERVAL_SECONDS`. The
+  slider bounds are templated from the Python constants so they can't drift.
+- **Optional netns traffic multiplier**: when enabled, each interface also gets a small fleet of `ip netns`
+  clients (reusing the `client_simulator` bridge/veth/MASQUERADE recipe, one `porcbr<idx>` bridge and
+  `10.210.<idx>.0/24` subnet per interface) generating HTTP load to a target URL. This is honestly *traffic*
+  load only: the clients NAT out through the interface's single radio MAC and never appear to the AP as
+  separate associations — the same L2 limit `client_simulator` documents. Fleets are set up once per run and
+  persist while the physical interface flaps; traffic simply errors during the disconnected windows.
+- **Log**: a bounded `deque` + monotonic cursor (like `iperf_congestion_generator`), polled at
+  `GET /api/output?since=`, so reloads/reattach and multiple tabs replay cleanly rather than stealing a
+  destructive stream. The page reattaches to a run already in progress on load.
+- **Degradation & idempotency**: refuses up front off-Linux or without `nmcli`/`iw`, returning a clear JSON
+  error so macOS dev never crashes; `netns` is only offered when `sudo -n ip netns list` succeeds. A
+  best-effort startup sweep removes leftover `porcupine-*` profiles, `porcbr*` bridges and `wfporc-*`
+  namespaces so a hard restart is idempotent.
+- **System Privilege Requirement**: needs `nmcli` + `ip`/`iptables`/`sysctl`. Like `client_simulator`, the
+  unit runs as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a
+  no-op under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -295,6 +326,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - WiFi Roaming Monitor worker: bound to `0.0.0.0:5007` (1 worker, multi-threaded for SSE streaming; reuses the existing `iw` sudoers rule).
    - Web Terminal wrapper: bound to `0.0.0.0:5008` (1 worker, multi-threaded; runs as `User=pi`, needs no privileges).
    - `ttyd` backend: bound to `127.0.0.1:5009` only, never the LAN (also `User=pi`; not a Gunicorn app — a standalone daemon installed to `/usr/local/bin/ttyd`).
+   - WiFi Porcupine worker: bound to `0.0.0.0:5010` (1 worker, multi-threaded; runs as root by default since it needs `nmcli`/`ip`/`iptables`/`sysctl`).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
@@ -306,6 +338,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `roaming-monitor.service`
    - `web-terminal.service`
    - `ttyd.service`
+   - `wifi-porcupine.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
@@ -318,6 +351,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/roaming/`): Proxies to WiFi Roaming Monitor (`127.0.0.1:5007`) with buffering disabled for SSE.
    - Port `80` (Subpath `/terminal/`): Proxies to the Web Terminal wrapper (`127.0.0.1:5008`).
    - Port `80` (Subpath `/terminal/tty/`): Proxies to `ttyd` (`127.0.0.1:5009`) with WebSocket upgrade headers, requiring the `$connection_upgrade` map installed to `/etc/nginx/conf.d/`.
+   - Port `80` (Subpath `/porcupine/`): Proxies to WiFi Porcupine (`127.0.0.1:5010`). Plain proxy — output is polled from a ring buffer, no SSE.
 
 ---
 

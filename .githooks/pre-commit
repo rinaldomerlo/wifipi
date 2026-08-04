@@ -1,0 +1,23 @@
+#!/bin/sh
+# WiFiPi: stamp the current git version into the landing page on every commit,
+# so the static page served from the Pi always reports the deployed version
+# without the Pi (or nginx) ever running git.
+#
+# Enable once per clone with:
+#     git config core.hooksPath .githooks
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# No --dirty here: the commit being created will be clean, so a "-dirty" suffix
+# (true only because the changes are still staged) would be misleading. The
+# parent commit's tag/height is what this commit's version should read.
+VERSION="$(git describe --tags --always 2>/dev/null || echo unknown)"
+
+"$ROOT/.githooks/stamp-version.sh" "$VERSION"
+
+# Fold the refreshed page into this commit only if the version actually changed,
+# so ordinary commits that don't move the version don't drag www/index.html in.
+if ! git diff --quiet -- www/index.html; then
+    git add www/index.html
+fi

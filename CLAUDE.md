@@ -20,6 +20,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `network_device_scanner/` | Flask app — ARP-based LAN device inventory (IP/MAC/vendor) via `nmap -sn` on a chosen Bind Interface. Port 5006, proxied at `/devices/`. |
 | `roaming_monitor/` | Flask app — live association-event timeline from `iw event`, with roam timing and decoded 802.11 reason codes. Port 5007, proxied at `/roaming/`. |
 | `web_terminal/` | Flask app — thin wrapper framing a `ttyd` browser shell. Port 5008, proxied at `/terminal/`; `ttyd` itself listens on loopback:5009. |
+| `wifi_porcupine/` | Flask app — stresses an AP by churning association/MAC across several physical WiFi interfaces (random MAC per reconnect via `nmcli`), with an optional per-interface `netns` traffic multiplier. Port 5010, proxied at `/porcupine/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -45,6 +46,7 @@ cd client_simulator && ../.venv/bin/python app.py                # :5005
 cd network_device_scanner && ../.venv/bin/python app.py          # :5006
 cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
 cd web_terminal && ../.venv/bin/python app.py                    # :5008
+cd wifi_porcupine && ../.venv/bin/python app.py                  # :5010
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -103,6 +105,19 @@ or when `iw` is absent, so macOS dev gets a clear error rather than a hung threa
 subprocess to a **pty** rather than a pipe — `iw` block-buffers when it sees a pipe, which would batch
 events instead of streaming them; `stdbuf` isn't usable here because `sudo` resets its environment.
 
+`wifi_porcupine` churns association state across several physical WiFi interfaces at once. It needs
+`nmcli` (for the MAC-randomizing connect/disconnect — one profile per interface with
+`802-11-wireless.cloned-mac-address random`) plus `ip`/`iptables`/`sysctl` (for the optional per-interface
+`netns` traffic fleets). Like `client_simulator`, its systemd unit runs as **root** by default, so it needs
+no new sudoers entry and the "four apps need passwordless sudo" count above is unchanged — commands still
+shell out via `sudo <cmd>`, a harmless no-op under root. Two things to keep straight: the netns clients NAT
+out through each interface's single radio MAC, so they are *traffic* load only and never appear to the AP as
+separate associations (the same L2 limit that `client_simulator` documents); and only the physical-interface
+association/MAC churn stresses the AP's association tables. It requires NetworkManager as the active backend,
+same caveat as `wifi_connection_manager`, and refuses up front off-Linux / without `nmcli`+`iw` so macOS dev
+gets a clear JSON error. It also runs a best-effort orphan sweep on startup (`porcupine-*` profiles,
+`porcbr*` bridges, `wfporc-*` namespaces) so a hard restart is idempotent.
+
 ---
 
 ## UI Requirements
@@ -140,4 +155,8 @@ Any new screen added to this project inherits both the design system and the hos
 - Add tests to the matching `tests/test_*.py` module. Note the import guard at the top of those files
   (`del sys.modules['app']`) that prevents collisions between the same-named `app` modules across the
   different Flask apps — preserve it.
+- The landing page (`www/index.html`) shows a version badge stamped from `git describe` at commit time by
+  `.githooks/pre-commit` (enable once with `git config core.hooksPath .githooks`). Don't hand-edit the
+  value or remove the `<!--VERSION-->…<!--/VERSION-->` markers it writes between — bump the version by
+  tagging (`git tag vX.Y`) and let the hook stamp it. The Pi never runs git; it just serves the stamped file.
 - Do not commit or push unless asked.

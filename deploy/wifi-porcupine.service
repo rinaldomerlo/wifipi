@@ -1,0 +1,15 @@
+[Unit]
+Description=WiFi Porcupine (Flask / Gunicorn)
+After=network.target
+
+[Service]
+# Uncomment and set User/Group if you wish to run as a specific non-root user (e.g., User=jenkins or User=pi).
+# If omitted, systemd runs the service as root -- required here for nmcli / ip / iptables / sysctl.
+# User=pi
+# Group=pi
+WorkingDirectory=/opt/wifipi/wifi_porcupine
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 0.0.0.0:5010 --workers 1 --threads 4 --timeout 120 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
