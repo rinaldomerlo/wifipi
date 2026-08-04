@@ -155,6 +155,11 @@ Any new screen added to this project inherits both the design system and the hos
 - Add tests to the matching `tests/test_*.py` module. Note the import guard at the top of those files
   (`del sys.modules['app']`) that prevents collisions between the same-named `app` modules across the
   different Flask apps — preserve it.
+- Per-app nginx proxy blocks live in `deploy/nginx.d/<app>.conf` (installed to `/etc/nginx/wifipi.d/`,
+  glob-included by `deploy/nginx.conf.example`); the landing page `www/index.html` self-discovers
+  installed apps by probing each card's `/<app>/api/hostname`, so adding a new app means adding a
+  `deploy/nginx.d/<app>.conf` snippet plus a landing-page card — no `/api/hostname` endpoints-array edit,
+  discovery derives the probe from the card's `href`.
 - The landing page (`www/index.html`) shows a version badge stamped from `git describe` at commit time by
   `.githooks/pre-commit` (enable once with `git config core.hooksPath .githooks`). Don't hand-edit the
   value or remove the `<!--VERSION-->…<!--/VERSION-->` markers it writes between — bump the version by

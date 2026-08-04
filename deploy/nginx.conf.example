@@ -4,6 +4,17 @@
 #   sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
 #   sudo nginx -t
 #   sudo systemctl restart nginx
+#
+# This file is app-independent. The per-app reverse-proxy blocks live in
+# separate snippets under deploy/nginx.d/ and are pulled in by the
+# `include /etc/nginx/wifipi.d/*.conf;` line below. Each Raspberry Pi installs
+# only the snippets for the apps it actually runs, so an app that isn't
+# installed simply has no location block (a clean 404) rather than a 502:
+#   sudo mkdir -p /etc/nginx/wifipi.d
+#   sudo cp deploy/nginx.d/wifimon.conf   /etc/nginx/wifipi.d/   # e.g. a monitor Pi
+#   sudo cp deploy/nginx.d/roaming.conf   /etc/nginx/wifipi.d/
+# A wildcard include that matches nothing is valid, so a Pi with no snippets
+# still serves the landing page fine. See README.md for the per-role install.
 
 server {
     listen 80 default_server;
@@ -22,186 +33,8 @@ server {
         ssi on;
     }
 
-    # Automatic redirect to trailing-slash URLs for subpath apps
-    location = /wifimon {
-        return 301 /wifimon/;
-    }
-
-    location = /iperf {
-        return 301 /iperf/;
-    }
-
-    location = /iperfserver {
-        return 301 /iperfserver/;
-    }
-
-    location = /wificonnect {
-        return 301 /wificonnect/;
-    }
-
-    location = /webbrowse {
-        return 301 /webbrowse/;
-    }
-
-    location = /clientsim {
-        return 301 /clientsim/;
-    }
-
-    location = /devices {
-        return 301 /devices/;
-    }
-
-    location = /roaming {
-        return 301 /roaming/;
-    }
-
-    location = /terminal {
-        return 301 /terminal/;
-    }
-
-    location = /porcupine {
-        return 301 /porcupine/;
-    }
-
-    # WiFi Channel & Utilization Monitor subpath (/wifimon/)
-    location /wifimon/ {
-        proxy_pass http://127.0.0.1:5000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # iPerf3 Congestion Generator subpath (/iperf/)
-    location /iperf/ {
-        proxy_pass http://127.0.0.1:5001/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Disable buffering for real-time Server-Sent Events (SSE) iperf3 output streaming
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-    }
-
-    # iPerf3 Server Manager subpath (/iperfserver/)
-    location /iperfserver/ {
-        proxy_pass http://127.0.0.1:5002/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WiFi Connection Manager subpath (/wificonnect/)
-    location /wificonnect/ {
-        proxy_pass http://127.0.0.1:5003/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Web Browsing Simulator's generated content (/webbrowse/content/) -- served directly by nginx
-    # as static files (bypassing Python) since this is just bulk random bytes. Must come before the
-    # generic /webbrowse/ proxy block below; nginx picks the longest matching prefix, so declaration
-    # order doesn't actually matter, but keeping the more specific block first reads more clearly.
-    location /webbrowse/content/ {
-        alias /opt/wifipi/web_browsing_simulator/content/;
-    }
-
-    # Web Browsing Simulator subpath (/webbrowse/)
-    location /webbrowse/ {
-        proxy_pass http://127.0.0.1:5004/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Disable buffering for real-time Server-Sent Events (SSE) page-load output streaming
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-    }
-
-    # Client Simulator subpath (/clientsim/)
-    location /clientsim/ {
-        proxy_pass http://127.0.0.1:5005/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Disable buffering for real-time Server-Sent Events (SSE) client-activity streaming
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-    }
-
-    # Network Device Scanner subpath (/devices/)
-    location /devices/ {
-        proxy_pass http://127.0.0.1:5006/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # WiFi Roaming Monitor subpath (/roaming/)
-    location /roaming/ {
-        proxy_pass http://127.0.0.1:5007/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Disable buffering for real-time Server-Sent Events (SSE) association-event streaming
-        proxy_buffering off;
-        proxy_cache off;
-        chunked_transfer_encoding on;
-    }
-
-    # WiFi Porcupine subpath (/porcupine/)
-    location /porcupine/ {
-        proxy_pass http://127.0.0.1:5010/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Web Terminal wrapper (/terminal/) -- WiFiPi header, hostname badge and the
-    # iframe that hosts the terminal. Plain proxy, no WebSocket here.
-    location /terminal/ {
-        proxy_pass http://127.0.0.1:5008/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # ttyd backend (/terminal/tty/). Nginx picks the longest matching prefix, so
-    # this wins over /terminal/ above.
-    #
-    # Requires the $connection_upgrade map from
-    # deploy/nginx-websocket-map.conf.example, installed to /etc/nginx/conf.d/.
-    location /terminal/tty/ {
-        # No URI part on proxy_pass: the path is passed through unmodified so it
-        # matches ttyd's --base-path, rather than being rewritten to /.
-        proxy_pass http://127.0.0.1:5009;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $host;
-
-        # A terminal can sit idle far longer than the 60s default before the user
-        # types again; without this nginx silently drops the session.
-        proxy_read_timeout 86400;
-        proxy_buffering off;
-
-        # The wrapper page frames ttyd on the same origin.
-        proxy_hide_header X-Frame-Options;
-    }
+    # Per-app reverse-proxy blocks (deploy/nginx.d/<app>.conf), installed per Pi.
+    # The landing page (www/index.html) self-discovers which apps are actually up
+    # by probing each /<app>/api/hostname, so it too reflects only what's installed.
+    include /etc/nginx/wifipi.d/*.conf;
 }

@@ -339,7 +339,13 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `web-terminal.service`
    - `ttyd.service`
    - `wifi-porcupine.service`
-3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`)
+3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`) — the site config is app-independent: it
+   serves the landing page and `include`s per-app snippets glob-matched from `/etc/nginx/wifipi.d/*.conf`.
+   Each app's proxy block is its own snippet, `deploy/nginx.d/<app>.conf`, installed per Pi to match
+   whichever units that Pi runs — an app that isn't installed is a clean 404 rather than a 502 from a
+   proxy pointing at a dead backend. The landing page (`www/index.html`) self-discovers which apps are
+   live by probing each card's `/<app>/api/hostname` in parallel, so none of this needs per-Pi editing.
+   The subpaths below enumerate every snippet the suite can install, as a reference:
    - Port `80` (Root `/`): Serves default static landing page (`/opt/wifipi/www/index.html`) with cards/links to all tools.
    - Port `80` (Subpath `/wifimon/`): Proxies to WiFi Monitor (`127.0.0.1:5000`).
    - Port `80` (Subpath `/iperf/`): Proxies to iPerf Generator (`127.0.0.1:5001`). No longer uses SSE — output is polled from per-test ring buffers — so the buffering directives there are vestigial and harmless.

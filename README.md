@@ -111,22 +111,47 @@ Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the curr
 
 The Web Terminal has no authentication, so anyone who can reach the Pi gets a shell. If you want a password on it, add `--credential user:password` to the `ExecStart` line in `deploy/ttyd.service`.
 
-Then install the service units:
+#### Install only the apps this Pi should run
+
+The suite is modular: each Pi runs only the subset of tools you want it to (a monitor Pi, a
+traffic-generator Pi, a porcupine Pi, and so on). Every app is one self-contained systemd unit — the Web
+Terminal is two — so you install just the units you want and pair each with its nginx snippet in Step 5.
+**You never edit the landing page per Pi**: it auto-detects which apps are actually running and shows only
+those cards.
+
+| App | systemd unit(s) | nginx snippet |
+| --- | --- | --- |
+| WiFi Utilization Monitor | `wifi-monitor` | `wifimon.conf` |
+| iPerf3 Congestion Generator | `iperf-generator` | `iperf.conf` |
+| iPerf3 Server Manager | `iperf-server-manager` | `iperfserver.conf` |
+| WiFi Connection Manager | `wifi-connection-manager` | `wificonnect.conf` |
+| Web Browsing Simulator | `web-browsing-simulator` | `webbrowse.conf` |
+| Client Simulator | `client-simulator` | `clientsim.conf` |
+| Network Device Scanner | `network-device-scanner` | `devices.conf` |
+| WiFi Roaming Monitor | `roaming-monitor` | `roaming.conf` |
+| Web Terminal | `web-terminal` + `ttyd` | `terminal.conf` (+ WebSocket map) |
+| WiFi Porcupine | `wifi-porcupine` | `porcupine.conf` |
+
+Copy the units you want. For example, a **monitor Pi**:
 
 ```bash
-sudo cp deploy/wifi-monitor.service /etc/systemd/system/
-sudo cp deploy/iperf-generator.service /etc/systemd/system/
-sudo cp deploy/iperf-server-manager.service /etc/systemd/system/
-sudo cp deploy/wifi-connection-manager.service /etc/systemd/system/
-sudo cp deploy/web-browsing-simulator.service /etc/systemd/system/
-sudo cp deploy/client-simulator.service /etc/systemd/system/
-sudo cp deploy/network-device-scanner.service /etc/systemd/system/
-sudo cp deploy/roaming-monitor.service /etc/systemd/system/
-sudo cp deploy/web-terminal.service /etc/systemd/system/
-sudo cp deploy/ttyd.service /etc/systemd/system/
-sudo cp deploy/wifi-porcupine.service /etc/systemd/system/
+for u in wifi-monitor roaming-monitor network-device-scanner wifi-connection-manager; do
+    sudo cp deploy/$u.service /etc/systemd/system/
+done
 sudo systemctl daemon-reload
 ```
+
+…or a **traffic-generator Pi**:
+
+```bash
+for u in iperf-generator web-browsing-simulator client-simulator wifi-porcupine; do
+    sudo cp deploy/$u.service /etc/systemd/system/
+done
+sudo systemctl daemon-reload
+```
+
+To run the whole suite on one box, copy them all (remember the Web Terminal is `web-terminal` **and**
+`ttyd`, and needs the `ttyd` binary installed above).
 
 *Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit the service files in `/etc/systemd/system/` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
 
@@ -145,36 +170,14 @@ This is an in-place edit rather than a config setting because systemd does not e
 
 Note that neither unit sets `Group=`, so systemd uses the account's primary group from `/etc/passwd`. Don't add one: on images where the primary group isn't named after the user, a hardcoded `Group=` fails with `status=216/GROUP`. Check yours with `id <your-username>` if you're curious. If a unit has already failed repeatedly, systemd latches its rate limiter and you need `sudo systemctl reset-failed ttyd web-terminal` before it will start again.
 
-Enable and start services:
+Enable and start only the units you copied in, e.g. for the **monitor Pi** from above:
 
 ```bash
-sudo systemctl enable --now wifi-monitor
-sudo systemctl enable --now iperf-generator
-sudo systemctl enable --now iperf-server-manager
-sudo systemctl enable --now wifi-connection-manager
-sudo systemctl enable --now web-browsing-simulator
-sudo systemctl enable --now client-simulator
-sudo systemctl enable --now network-device-scanner
-sudo systemctl enable --now roaming-monitor
-sudo systemctl enable --now ttyd
-sudo systemctl enable --now web-terminal
-sudo systemctl enable --now wifi-porcupine
+sudo systemctl enable --now wifi-monitor roaming-monitor network-device-scanner wifi-connection-manager
 ```
 
-Verify service status:
-```bash
-sudo systemctl status wifi-monitor
-sudo systemctl status iperf-generator
-sudo systemctl status iperf-server-manager
-sudo systemctl status wifi-connection-manager
-sudo systemctl status web-browsing-simulator
-sudo systemctl status client-simulator
-sudo systemctl status network-device-scanner
-sudo systemctl status roaming-monitor
-sudo systemctl status ttyd
-sudo systemctl status web-terminal
-sudo systemctl status wifi-porcupine
-```
+Verify status the same way, one unit (or several) at a time: `sudo systemctl status <unit>` and, for
+deeper logs, `sudo journalctl -u <unit> -e`.
 
 #### Multi-Port iPerf3 Server Services (Optional)
 
@@ -192,43 +195,57 @@ These multi-port iPerf3 server daemons will automatically be discovered and can 
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
-The default static landing webpage is located in `/opt/wifipi/www/index.html`. Nginx serves this page directly on Root (`/`) and proxies requests for `/wifimon/`, `/iperf/`, `/iperfserver/`, `/wificonnect/`, `/webbrowse/`, `/clientsim/`, `/devices/`, `/roaming/`, `/terminal/`, and `/porcupine/` to the respective backend Flask apps.
+The default static landing webpage is located in `/opt/wifipi/www/index.html`. The main Nginx site config
+(`deploy/nginx.conf.example`) is app-independent: it just serves the landing page on Root (`/`) and
+`include`s every snippet dropped into `/etc/nginx/wifipi.d/*.conf`. Each app's proxy block lives in its own
+snippet under `deploy/nginx.d/<app>.conf` (see the table in Step 4), so you install only the snippets for
+the apps running on this Pi — an app you didn't install is simply a 404, not a 502 from a proxy pointing at
+a dead backend. The landing page auto-detects which apps answer, so none of this requires per-Pi editing
+of `www/index.html`.
 
-For `/webbrowse/` specifically, Nginx also serves the app's generated synthetic content directly as
-static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
+For `/webbrowse/` specifically, `webbrowse.conf` also serves the app's generated synthetic content directly
+as static files via an `alias` block (`/webbrowse/content/` → `/opt/wifipi/web_browsing_simulator/content/`)
 instead of proxying it through Python — since that content is just bulk random bytes used to generate
 realistic browsing traffic, there's no reason to pay the Python/WSGI overhead for it. This means the
 Nginx worker user (commonly `www-data`) needs read access to `/opt/wifipi/web_browsing_simulator/content/`,
 same as it already needs for `/opt/wifipi/www`.
 
-1. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`:
+1. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`, and create the directory the per-app snippets get installed into:
    ```bash
    sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/wifipi
+   sudo mkdir -p /etc/nginx/wifipi.d
    ```
 
-2. Install the WebSocket upgrade map required by the Web Terminal. This has to be a separate file:
-   `nginx.conf.example` is a `server { }` block, but nginx's `map` directive is only valid in `http { }`
-   context, and Debian's nginx includes `/etc/nginx/conf.d/*.conf` at that level:
+2. Copy in only the snippets for the apps you installed in Step 4. For example, the same **monitor Pi**:
+   ```bash
+   for a in wifimon roaming devices wificonnect; do
+       sudo cp deploy/nginx.d/$a.conf /etc/nginx/wifipi.d/
+   done
+   ```
+
+3. Install the WebSocket upgrade map — but only if you installed the Web Terminal. This has to be a
+   separate file: nginx's `map` directive is only valid in `http { }` context, and Debian's nginx includes
+   `/etc/nginx/conf.d/*.conf` at that level:
    ```bash
    sudo cp deploy/nginx-websocket-map.conf.example /etc/nginx/conf.d/websocket-upgrade.conf
    ```
-   Skip this only if you are also skipping the Web Terminal — without it, `nginx -t` fails with
-   `unknown "connection_upgrade" variable`.
+   Skip this if you are also skipping the Web Terminal — but if `terminal.conf` is present in
+   `/etc/nginx/wifipi.d/` without this map, `nginx -t` fails with `unknown "connection_upgrade" variable`.
 
-3. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
+4. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
    ```bash
    sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
 
-4. Test the Nginx configuration, then enable and (re)start Nginx:
+5. Test the Nginx configuration, then enable and (re)start Nginx:
    ```bash
    sudo nginx -t
    sudo systemctl enable --now nginx
-   sudo systemctl restart nginx
+   sudo systemctl reload nginx
    ```
-   `enable --now` makes sure Nginx starts on boot and is running; the `restart` after it picks up the
-   config you just installed even if Nginx was already running and enabled from a prior setup.
+   `enable --now` makes sure Nginx starts on boot and is running; `reload` picks up the config you just
+   installed even if Nginx was already running and enabled from a prior setup.
 
 > **Note on the host name display**: every page shows the host it is served from. The three Flask apps
 > report it directly. The static landing page has no backend, so it relies on the `ssi on;` directive in
@@ -237,6 +254,10 @@ same as it already needs for `/opt/wifipi/www`.
 > host name rather than falling back to the IP address you typed in the URL bar.
 
 ### Accessing Your Applications
+
+Only the tools actually installed and running on a given Pi appear as cards on its landing page — the
+rest are simply absent, not shown as broken links. The full list below is a reference for every app the
+suite can host, across any Pi:
 
 All applications are served over standard HTTP (Port 80) via path routing:
 

@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Mark JS as available so cards can start hidden and be revealed only for the
+         apps that actually respond on this Pi. With JS off, .js is never added and
+         all cards show (the pre-modular behaviour) — a clean no-JS fallback. -->
+    <script>document.documentElement.className += ' js';</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFiPi - Wireless Testing Tools</title>
@@ -198,6 +202,27 @@
             padding: 0.25rem 0.6rem;
             border-radius: 4px;
         }
+
+        /* App discovery: when JS is available, cards start hidden and only the
+           apps that answer /<app>/api/hostname on this Pi are revealed (.live).
+           The .empty class is added by JS to sections/dividers with no live cards. */
+        .js .app-card { display: none; }
+        .js .app-card.live { display: flex; }
+        .section-label.empty,
+        .apps-grid.empty,
+        .section-divider.empty { display: none; }
+
+        #empty-state {
+            display: none;
+            color: var(--text-secondary);
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        #empty-state.show { display: block; }
     </style>
 </head>
 <body>
@@ -221,19 +246,6 @@
                         <span class="path-badge">/wifimon/</span>
                     </div>
                     <p class="card-desc">Real-time spectrum analysis, channel utilization, and BSS scanning across 2.4 GHz, 5 GHz, and 6 GHz bands.</p>
-                </div>
-                <div class="btn-open">
-                    Open App &rarr;
-                </div>
-            </a>
-
-            <a href="/iperf/" class="app-card">
-                <div>
-                    <div class="card-header">
-                        <h2 class="card-title">iPerf3 Congestion Generator</h2>
-                        <span class="path-badge">/iperf/</span>
-                    </div>
-                    <p class="card-desc">Configure, monitor, and run iPerf3 client test streams across network interfaces.</p>
                 </div>
                 <div class="btn-open">
                     Open App &rarr;
@@ -310,6 +322,19 @@
 
         <div class="section-label">Traffic Generators</div>
         <div class="apps-grid">
+            <a href="/iperf/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">iPerf3 Congestion Generator</h2>
+                        <span class="path-badge">/iperf/</span>
+                    </div>
+                    <p class="card-desc">Configure, monitor, and run iPerf3 client test streams across network interfaces.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
+
             <a href="/webbrowse/" class="app-card">
                 <div>
                     <div class="card-header">
@@ -350,52 +375,95 @@
             </a>
         </div>
 
+        <div id="empty-state">
+            No WiFiPi tools appear to be running on this host yet.
+        </div>
+
         <footer>
             <p>WiFi<span>Pi</span> &bull; Hosted on Raspberry Pi</p>
         </footer>
     </div>
 
     <script>
-        // This page is static, so the host name is resolved in escalating steps:
-        //   1. Nginx SSI substitutes the real host name above (requires `ssi on;`).
-        //   2. Otherwise ask a proxied Flask app, which reports socket.gethostname().
-        //   3. Otherwise settle for the address this page was reached on (often an IP).
+        // Self-discovering landing page. This box may run only a SUBSET of the
+        // WiFiPi tools, so every card starts hidden (via the .js gate) and is
+        // revealed only if its app actually responds on this host. Each app is
+        // probed at /<app>/api/hostname — the one endpoint every app is required
+        // to expose — which doubles as the host-name source. Same-origin (all
+        // apps are nginx subpaths), so no CORS. An app that isn't installed 404s
+        // and its card simply stays hidden.
+        //
+        // Host name is still resolved in escalating steps:
+        //   1. Nginx SSI substitutes it above (requires `ssi on;`).
+        //   2. Otherwise the first app that answers a probe supplies it.
+        //   3. Otherwise the address this page was reached on (often an IP).
         (function () {
-            var el = document.getElementById('hostName');
-            if (!el) return;
+            var PROBE_TIMEOUT_MS = 2500;
 
-            // Step 1 already succeeded — nothing to do.
-            if (el.textContent.trim()) return;
+            var host = document.getElementById('hostName');
+            var hostResolved = !!(host && host.textContent.trim());
+            // Immediate non-blank fallback so the badge is never empty while probing.
+            if (host && !hostResolved) host.textContent = window.location.hostname || 'localhost';
 
-            // Step 3 up front, so the badge is never blank while step 2 is in flight.
-            el.textContent = window.location.hostname || 'localhost';
+            var cards = Array.prototype.slice.call(document.querySelectorAll('.app-card'));
 
-            var endpoints = [
-                '/wifimon/api/hostname',
-                '/iperfserver/api/hostname',
-                '/iperf/api/hostname',
-                '/wificonnect/api/hostname',
-                '/webbrowse/api/hostname',
-                '/clientsim/api/hostname',
-                '/devices/api/hostname',
-                '/roaming/api/hostname',
-                '/terminal/api/hostname',
-                '/porcupine/api/hostname'
-            ];
-
-            (function tryNext(i) {
-                if (i >= endpoints.length) return;
-                fetch(endpoints[i], { cache: 'no-store' })
+            function probe(card) {
+                var href = card.getAttribute('href') || '';
+                var url = href.replace(/\/?$/, '/') + 'api/hostname';
+                var ctrl = new AbortController();
+                var timer = setTimeout(function () { ctrl.abort(); }, PROBE_TIMEOUT_MS);
+                return fetch(url, { cache: 'no-store', signal: ctrl.signal })
                     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
                     .then(function (data) {
-                        if (data && data.hostname) {
-                            el.textContent = data.hostname;
-                        } else {
-                            tryNext(i + 1);
+                        clearTimeout(timer);
+                        card.classList.add('live');
+                        if (host && !hostResolved && data && data.hostname) {
+                            host.textContent = data.hostname;
+                            hostResolved = true;
                         }
                     })
-                    .catch(function () { tryNext(i + 1); });
-            })(0);
+                    .catch(function () { clearTimeout(timer); });
+            }
+
+            function nearestGrid(node, dir) {
+                var n = dir < 0 ? node.previousElementSibling : node.nextElementSibling;
+                while (n) {
+                    if (n.classList && n.classList.contains('apps-grid')) return n;
+                    n = dir < 0 ? n.previousElementSibling : n.nextElementSibling;
+                }
+                return null;
+            }
+
+            function isEmptyGrid(grid) {
+                return !grid || grid.querySelectorAll('.app-card.live').length === 0;
+            }
+
+            Promise.all(cards.map(probe)).then(function () {
+                var anyLive = false;
+
+                // Hide a section (its grid + preceding label) when no card survived.
+                Array.prototype.slice.call(document.querySelectorAll('.apps-grid')).forEach(function (grid) {
+                    if (isEmptyGrid(grid)) {
+                        grid.classList.add('empty');
+                        var label = grid.previousElementSibling;
+                        if (label && label.classList.contains('section-label')) label.classList.add('empty');
+                    } else {
+                        anyLive = true;
+                    }
+                });
+
+                // A divider only earns its keep between two non-empty sections.
+                Array.prototype.slice.call(document.querySelectorAll('.section-divider')).forEach(function (hr) {
+                    if (isEmptyGrid(nearestGrid(hr, -1)) || isEmptyGrid(nearestGrid(hr, 1))) {
+                        hr.classList.add('empty');
+                    }
+                });
+
+                if (!anyLive) {
+                    var es = document.getElementById('empty-state');
+                    if (es) es.classList.add('show');
+                }
+            });
         })();
     </script>
 
