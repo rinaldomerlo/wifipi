@@ -556,7 +556,10 @@
                     <div class="net-list" id="net-list" style="display: none;"></div>
 
                     <label for="password"><i class="fa-solid fa-key"></i> Password</label>
-                    <input id="password" type="password" placeholder="Leave blank for an open network">
+                    <div class="row" style="gap: 0.5rem;">
+                        <input id="password" type="password" placeholder="Leave blank for an open network" style="flex: 1;">
+                        <button type="button" class="btn btn-ghost" id="btn-toggle-password" onclick="togglePasswordVisibility()" title="Show password"><i class="fa-solid fa-eye"></i></button>
+                    </div>
 
                     <label class="check-row" for="randomize-mac">
                         <input type="checkbox" id="randomize-mac" checked>
@@ -630,6 +633,15 @@
         function setRunning(running) {
             document.getElementById('btn-start').disabled = running;
             document.getElementById('btn-stop').disabled = !running;
+        }
+
+        function togglePasswordVisibility() {
+            const input = document.getElementById('password');
+            const btn = document.getElementById('btn-toggle-password');
+            const showing = input.type === 'text';
+            input.type = showing ? 'password' : 'text';
+            btn.innerHTML = showing ? '<i class="fa-solid fa-eye"></i>' : '<i class="fa-solid fa-eye-slash"></i>';
+            btn.title = showing ? 'Show password' : 'Hide password';
         }
 
         function updateIntensityLabel() {

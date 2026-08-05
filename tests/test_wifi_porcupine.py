@@ -41,6 +41,11 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertIn(b'Porcupine', response.data)
         self.assertIn(b'Intensity', response.data)
 
+    def test_index_route_has_password_visibility_toggle(self):
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('btn-toggle-password', html)
+        self.assertIn('togglePasswordVisibility()', html)
+
     def test_index_route_displays_hostname(self):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
