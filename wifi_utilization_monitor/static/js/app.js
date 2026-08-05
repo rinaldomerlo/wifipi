@@ -4,7 +4,7 @@
 const state = {
     interfaces: [],
     selectedInterface: '',
-    refreshRate: 5000, // ms
+    refreshRate: 10000, // ms
     isPaused: false,
     isScanning: false,
     countdown: 0,
@@ -21,7 +21,10 @@ const state = {
     canvasElements: {},
     canvasContexts: {},
     // Trailing signal history per BSSID for the trend rail: { [bssid]: [{t, dbm}, ...] }
-    signalHistory: {}
+    signalHistory: {},
+    // Per-BSSID metadata (ssid/band/channel) for APs currently in signalHistory,
+    // kept in lockstep with it so the trend rail can render from history alone.
+    apMeta: {}
 };
 
 // How far back the trend rail keeps raw samples. A generous window (5 min) so
@@ -699,6 +702,7 @@ function updateSignalHistory(records) {
         if (!rec.bssid || rec.signal_dbm === null || rec.signal_dbm === undefined) return;
         const hist = state.signalHistory[rec.bssid] || (state.signalHistory[rec.bssid] = []);
         hist.push({ t: now, dbm: rec.signal_dbm });
+        state.apMeta[rec.bssid] = { ssid: rec.ssid, band: rec.band, channel: rec.channel };
     });
 
     const cutoff = now - SIGNAL_HISTORY_WINDOW_MS;
@@ -708,6 +712,7 @@ function updateSignalHistory(records) {
             state.signalHistory[bssid] = pruned;
         } else {
             delete state.signalHistory[bssid];
+            delete state.apMeta[bssid];
         }
     });
 }
@@ -743,23 +748,32 @@ function renderTrendRail() {
     const listEl = document.getElementById('trendRailList');
     if (!listEl) return;
 
-    const records = state.currentScanData || [];
+    // Source the AP list from the trailing signal history (not the latest scan's
+    // records) so a transient scan error -- which clears state.currentScanData via
+    // clearScanVisualization() -- doesn't blank the rail while trend samples are
+    // still sitting in memory. See updateSignalHistory()'s age-only pruning comment.
+    const bssids = Object.keys(state.signalHistory);
 
     const totalEl = document.getElementById('statTotalAps');
-    if (totalEl) totalEl.textContent = records.length;
+    if (totalEl) totalEl.textContent = bssids.length;
 
-    if (records.length === 0) {
+    if (bssids.length === 0) {
         listEl.innerHTML = '<p class="trend-empty">Waiting for scan data&hellip;</p>';
         return;
     }
 
-    // Strongest signal first, capped to keep the rail scannable.
-    const sorted = records.slice().sort((a, b) => b.signal_dbm - a.signal_dbm);
+    // Strongest (most recent raw) signal first, capped to keep the rail scannable.
+    const sorted = bssids.slice().sort((a, b) => {
+        const histA = state.signalHistory[a];
+        const histB = state.signalHistory[b];
+        return histB[histB.length - 1].dbm - histA[histA.length - 1].dbm;
+    });
     const shown = sorted.slice(0, TREND_RAIL_MAX_APS);
 
     let html = '';
-    shown.forEach(rec => {
-        const hist = state.signalHistory[rec.bssid] || [{ t: Date.now(), dbm: rec.signal_dbm }];
+    shown.forEach(bssid => {
+        const hist = state.signalHistory[bssid];
+        const meta = state.apMeta[bssid] || {};
         const emaSeries = computeEmaSeries(hist);
         const currentEma = Math.round(emaSeries[emaSeries.length - 1]);
 
@@ -775,13 +789,13 @@ function renderTrendRail() {
         const deltaArrow = delta >= 0 ? '▲' : '▼';
         const deltaLabel = `${deltaArrow} ${delta >= 0 ? '+' : ''}${delta}/${TREND_DELTA_WINDOW_SECONDS}s`;
 
-        const rawStroke = getApColor(rec.ssid, rec.bssid, 0.3);
-        const emaStroke = getApColor(rec.ssid, rec.bssid, 1);
+        const rawStroke = getApColor(meta.ssid, bssid, 0.3);
+        const emaStroke = getApColor(meta.ssid, bssid, 1);
         const spark = buildSparkline(hist, emaSeries, rawStroke, emaStroke);
 
-        const ssidLabel = rec.ssid || 'Hidden';
-        const channelLabel = rec.channel !== null && rec.channel !== undefined ? `ch ${rec.channel}` : '';
-        const bandLabel = rec.band || '';
+        const ssidLabel = meta.ssid || 'Hidden';
+        const channelLabel = meta.channel !== null && meta.channel !== undefined ? `ch ${meta.channel}` : '';
+        const bandLabel = meta.band || '';
         const metaLabel = [bandLabel, channelLabel].filter(Boolean).join(' / ');
 
         html += `
