@@ -541,6 +541,7 @@
                         <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 2.5em; text-align: right;">{{ intensity_default }}</span>
                     </div>
                     <div class="hint">Controls churn speed — shorter dwell time between reconnects. Every ticked interface above churns simultaneously.</div>
+                    <div class="hint" id="intensity-rate" style="color: var(--color-blue);"></div>
 
                     <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
                     <input id="duration" type="number" value="60" min="1">
@@ -603,6 +604,23 @@
         let statusTimer = null;
         let outputCursor = 0;
 
+        // Mirrors compute_dwell_range() in app.py so the estimate below the slider
+        // can't drift out of sync with what the churn engine actually does.
+        const INTENSITY_MIN = {{ intensity_min }};
+        const INTENSITY_MAX = {{ intensity_max }};
+        const DWELL_MIN = [{{ dwell_min[0] }}, {{ dwell_min[1] }}];
+        const DWELL_MAX = [{{ dwell_max[0] }}, {{ dwell_max[1] }}];
+        const GAP_RANGE = [{{ gap_range[0] }}, {{ gap_range[1] }}];
+
+        function estimatedReconnectsPerMinute(intensity) {
+            const t = (intensity - INTENSITY_MIN) / (INTENSITY_MAX - INTENSITY_MIN);
+            const dwellLow = DWELL_MIN[0] + (DWELL_MAX[0] - DWELL_MIN[0]) * t;
+            const dwellHigh = DWELL_MIN[1] + (DWELL_MAX[1] - DWELL_MIN[1]) * t;
+            const dwellAvg = (dwellLow + dwellHigh) / 2;
+            const gapAvg = (GAP_RANGE[0] + GAP_RANGE[1]) / 2;
+            return 60 / (dwellAvg + gapAvg);
+        }
+
         function setStatus(msg, color) {
             const el = document.getElementById('status-msg');
             el.textContent = msg;
@@ -615,7 +633,18 @@
         }
 
         function updateIntensityLabel() {
-            document.getElementById('intensity-value').textContent = document.getElementById('intensity').value;
+            const intensity = parseInt(document.getElementById('intensity').value);
+            document.getElementById('intensity-value').textContent = intensity;
+
+            const perInterface = estimatedReconnectsPerMinute(intensity);
+            const rate = perInterface >= 10 ? Math.round(perInterface) : perInterface.toFixed(1);
+            const n = selectedInterfaces().length;
+            let text = `≈ ${rate} reconnects/min per interface`;
+            if (n > 1) {
+                const total = perInterface * n;
+                text += ` (≈ ${total >= 10 ? Math.round(total) : total.toFixed(1)}/min total across ${n} interfaces)`;
+            }
+            document.getElementById('intensity-rate').textContent = text;
         }
 
         async function loadInterfaces() {
@@ -641,8 +670,16 @@
                 });
             } catch (e) {
                 list.innerHTML = '<div class="hint">Failed to load interfaces.</div>';
+            } finally {
+                updateIntensityLabel();  // refreshes the "total across N interfaces" part
             }
         }
+
+        // Ticking/unticking an interface changes the total reconnect rate estimate,
+        // even though the slider itself hasn't moved.
+        document.getElementById('iface-list').addEventListener('change', (e) => {
+            if (e.target.classList.contains('iface-cb')) updateIntensityLabel();
+        });
 
         function selectedInterfaces() {
             return Array.from(document.querySelectorAll('.iface-cb'))
@@ -859,6 +896,7 @@
             } catch (e) { /* leave idle state alone on a failed probe */ }
         }
 
+        updateIntensityLabel();
         loadInterfaces();
         reattach();
     </script>

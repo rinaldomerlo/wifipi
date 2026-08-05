@@ -23,6 +23,7 @@ during development -- every route degrades to a clear JSON error instead of
 crashing. See CLAUDE.md's Environment Split section.
 """
 
+import fcntl
 import os
 import platform
 import random
@@ -31,6 +32,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -54,6 +56,13 @@ CONNECT_TIMEOUT = 30
 MAX_OUTPUT_LINES = 2000
 
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+# Cross-process guard (see acquire_run_lock()) so a stray second process -- a manual
+# `python app.py` left running alongside the systemd service, a duplicate deploy, etc. --
+# can't also churn the same physical interfaces. run_lock below only protects this one
+# process's in-memory state; it can't see other processes.
+LOCK_PATH = os.path.join(tempfile.gettempdir(), "wifi-porcupine.lock")
+_lock_fd = None
 
 # --- Shared state (guarded by run_lock; the log has its own lock) ---
 run_lock = threading.Lock()
@@ -336,6 +345,65 @@ def churn_worker(iface, config):
         stats["active_interfaces"] = len(run_state["connected"])
 
 
+def acquire_run_lock(info: str = "") -> bool:
+    """Grab a system-wide exclusive lock so at most one WiFi Porcupine process can
+    have an active run at a time -- not just at most one run within this process.
+
+    run_state["running"] alone only guards against double-starting within a single
+    process; it's invisible to a second process (a stray manual `python app.py` left
+    running next to the systemd service, a duplicate deploy, etc.). Two processes
+    independently racing `nmcli connection up/down` against the same physical radios
+    would corrupt NetworkManager state, not just waste resources.
+
+    Uses flock() rather than a PID file: the OS drops it the moment the holding
+    process exits for any reason, including a crash or SIGKILL, so there's no stale
+    lock to detect or clean up on the next start. Returns False if another process
+    (or another open of this file) already holds it. `info` (e.g. the target SSID)
+    is stamped into the file alongside the PID purely so a rejected caller can report
+    *what* is already running via read_run_lock_info(), not to coordinate anything.
+    """
+    global _lock_fd
+    try:
+        fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    os.ftruncate(fd, 0)
+    os.write(fd, f"pid={os.getpid()} {info}".strip().encode())
+    _lock_fd = fd
+    return True
+
+
+def read_run_lock_info() -> str:
+    """Best-effort read of whatever acquire_run_lock() last stamped into the lock
+    file, so a rejected /api/start can say what's already running and where.
+    Returns '' if the file is missing or unreadable -- purely cosmetic, never
+    used to make a decision.
+    """
+    try:
+        with open(LOCK_PATH, "r") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def release_run_lock():
+    """Release the lock acquired by acquire_run_lock(). Safe to call when not held."""
+    global _lock_fd
+    if _lock_fd is None:
+        return
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+        os.close(_lock_fd)
+    except OSError:
+        pass
+    _lock_fd = None
+
+
 def duration_timer(minutes):
     """Stop the run once its duration elapses (unless already stopped)."""
     if stop_event.wait(minutes * 60):
@@ -393,6 +461,7 @@ def stop_run():
         run_state["connected"] = set()
         run_state["wifi_mode"] = None
         stats["active_interfaces"] = 0
+    release_run_lock()
     _log("Run stopped; interfaces disconnected and profiles removed.")
     stop_event.clear()
     return True
@@ -463,6 +532,9 @@ def index():
         intensity_min=INTENSITY_RANGE[0],
         intensity_max=INTENSITY_RANGE[1],
         intensity_default=DEFAULT_INTENSITY,
+        dwell_min=DWELL_AT_MIN_INTENSITY,
+        dwell_max=DWELL_AT_MAX_INTENSITY,
+        gap_range=GAP_RANGE,
     )
 
 
@@ -629,6 +701,13 @@ def api_start():
     with run_lock:
         if run_state["running"]:
             return jsonify({"error": "A run is already in progress."}), 409
+        if not acquire_run_lock(f"ssid={ssid!r}"):
+            holder = read_run_lock_info()
+            detail = f" ({holder})" if holder else ""
+            return jsonify({
+                "error": f"Another WiFi Porcupine process already has a run in progress "
+                         f"on this host{detail}. Stop it there first.",
+            }), 409
         run_state["running"] = True
         run_state["wifi_mode"] = "live"
         run_state["enlisted"] = clean

@@ -287,7 +287,11 @@ Project Root Structure:
   `compute_dwell_range`. Concurrency is not derived from it: every ticked interface churns simultaneously,
   each in its own daemon thread. A random initial jitter (0..dwell_high) before each thread's first connect
   keeps interfaces desynchronized from cycle 1, rather than all connecting in lockstep because `start_run`
-  launches them together. The slider bounds are templated from the Python constants so they can't drift.
+  launches them together. The slider bounds *and* the dwell/gap constants are templated into the page so a
+  JS-side estimate (`estimatedReconnectsPerMinute`, mirroring `compute_dwell_range`) can show "≈X
+  reconnects/min per interface" live under the slider — 1 is ~1.7/min, 10 is ~12.6/min, non-linear across
+  the range — plus a total across however many interfaces are currently ticked. Keep the JS formula and
+  `compute_dwell_range` in sync if either changes.
 - **Target SSID convenience**: `GET /api/scan` scans one interface (`--rescan yes`; fine here since it's a
   single one-off request, not something polled on a timer like `wifi_connection_manager`'s status endpoint)
   and returns a deduped, signal-sorted network list purely so the SSID field can be filled by clicking
@@ -304,6 +308,13 @@ Project Root Structure:
 - **Degradation & idempotency**: refuses up front off-Linux or without `nmcli`/`iw`, returning a clear JSON
   error so macOS dev never crashes. A best-effort startup sweep removes leftover `porcupine-*` profiles so a
   hard restart is idempotent.
+- **Single-instance guard**: `run_state["running"]` only stops a second run *within this process*; it's
+  invisible to a second OS process (a stray manual `python app.py` left running next to the systemd service,
+  a duplicate deploy). `acquire_run_lock()`/`release_run_lock()` add a machine-wide `flock()` on
+  `<tmp>/wifi-porcupine.lock`, taken alongside `run_state["running"]` in `/api/start` and dropped at the end
+  of `stop_run()`. flock is per-open-file-description and OS-released on process exit (even a crash/SIGKILL),
+  so there's no PID file staleness to detect or sweep on restart. A rejected start's error message includes
+  whatever the current holder stamped into the lock file (PID + target SSID) purely for diagnostics.
 - **System Privilege Requirement**: needs only `nmcli` (+ `iw` for interface listing). The unit still runs
   as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a no-op
   under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.

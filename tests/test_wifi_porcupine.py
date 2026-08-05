@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+import fcntl
 import os
 import socket
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -29,6 +31,7 @@ class TestWifiPorcupine(unittest.TestCase):
             "reconnects": 0, "errors": 0, "active_interfaces": 0,
         })
         wp_app_module.stop_event.clear()
+        wp_app_module.release_run_lock()  # defensive: don't let one test's lock leak into the next
 
     # -- basic routes --------------------------------------------------
 
@@ -313,6 +316,60 @@ class TestWifiPorcupine(unittest.TestCase):
         response = self.client.post('/api/stop')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['status'], 'no run in progress')
+
+    # -- cross-process run lock ------------------------------------------
+    #
+    # acquire_run_lock()/release_run_lock() guard against a second OS process
+    # (not just a second request to this one) starting a competing run. flock()
+    # locks are per *open file description*, not per process, so opening the
+    # same path a second time from right here in the test and locking it is a
+    # faithful stand-in for "another process already holds it".
+
+    def test_acquire_and_release_run_lock_real_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = os.path.join(tmpdir, 'test.lock')
+            with patch('wifi_porcupine.app.LOCK_PATH', lock_path):
+                self.assertTrue(wp_app_module.acquire_run_lock('ssid=Foo'))
+
+                # A second, independent open of the same path -- simulating another
+                # process -- must not also be able to lock it.
+                other_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    with self.assertRaises(OSError):
+                        fcntl.flock(other_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(other_fd)
+
+                self.assertIn('Foo', wp_app_module.read_run_lock_info())
+
+                wp_app_module.release_run_lock()
+
+                # Freed after release.
+                other_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl.flock(other_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(other_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(other_fd)
+
+    def test_release_run_lock_when_not_held_is_a_noop(self):
+        wp_app_module.release_run_lock()  # must not raise
+
+    @patch('wifi_porcupine.app.threading.Thread')
+    @patch('wifi_porcupine.app.acquire_run_lock', return_value=False)
+    @patch('wifi_porcupine.app.read_run_lock_info', return_value='pid=999 ssid=OtherNet')
+    def test_start_route_rejected_when_another_process_holds_the_lock(
+        self, mock_info, mock_acquire, mock_thread
+    ):
+        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
+             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']):
+            response = self.client.post('/api/start', json={"interfaces": ["wlan0"], "ssid": "MyNet"})
+        self.assertEqual(response.status_code, 409)
+        error = response.get_json()['error']
+        self.assertIn('Another WiFi Porcupine process', error)
+        self.assertIn('pid=999 ssid=OtherNet', error)
+        mock_thread.assert_not_called()
+        self.assertFalse(wp_app_module.run_state['running'])
 
 
 if __name__ == '__main__':
