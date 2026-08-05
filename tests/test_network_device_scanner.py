@@ -16,6 +16,9 @@ import network_device_scanner.app as nds_app_module
 nds_app = nds_app_module.app
 
 IP_ADDR_STDOUT = "inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+# `ip -o addr show` (used by get_bindable_interfaces) puts one address per line with a
+# fixed "<idx>: <ifname> ..." prefix, unlike the plain `ip addr show` fixture above.
+IP_ADDR_ONELINE_STDOUT = "2: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
 
 NMAP_XML_STDOUT = """<?xml version="1.0"?>
 <nmaprun>
@@ -38,7 +41,7 @@ def subprocess_side_effect(cmd, **kwargs):
     m = MagicMock()
     m.returncode = 0
     if cmd[0] == "ip":
-        m.stdout = IP_ADDR_STDOUT
+        m.stdout = IP_ADDR_ONELINE_STDOUT if "-o" in cmd else IP_ADDR_STDOUT
     elif cmd[0] == "sudo":
         m.stdout = NMAP_XML_STDOUT
         m.stderr = ""
@@ -177,6 +180,27 @@ class TestNetworkDeviceScanner(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data['count'], 2)
         self.assertIsNotNone(data['timestamp'])
+
+    @patch('network_device_scanner.app.shutil.which')
+    @patch('network_device_scanner.app.subprocess.run')
+    def test_get_bindable_interfaces_parses_oneline_output(self, mock_run, mock_which):
+        mock_which.return_value = '/usr/sbin/ip'
+        mock_run.return_value = MagicMock(stdout=(
+            "2: eth0    inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0\n"
+            "3: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+        ))
+        self.assertEqual(nds_app_module.get_bindable_interfaces(), ['eth0', 'wlan0'])
+
+    @patch('network_device_scanner.app.shutil.which', return_value=None)
+    def test_get_bindable_interfaces_without_ip_binary(self, mock_which):
+        self.assertEqual(nds_app_module.get_bindable_interfaces(), [])
+
+    def test_api_interfaces_route(self):
+        response = self.client.get('/api/interfaces')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIn('interfaces', data)
 
 
 if __name__ == '__main__':

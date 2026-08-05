@@ -546,6 +546,23 @@
         let cursors       = {};   // test id -> next line index to fetch
         let maxConcurrent = 8;    // server-enforced cap, refreshed from /tests
 
+        // Populates the Bind Interface dropdown from real interfaces on this host.
+        // If detection is unavailable (off-Linux dev, no iproute2, or the request
+        // simply fails) the static wlan0/eth0 options already in the markup are
+        // left in place rather than cleared out.
+        async function loadInterfaces() {
+            const select = document.getElementById('interface');
+            try {
+                const res = await fetch('interfaces', { cache: 'no-store' });
+                const data = await res.json();
+                if (data.success && data.interfaces && data.interfaces.length) {
+                    const previous = select.value;
+                    select.innerHTML = data.interfaces.map((i) => `<option value="${i}">${i}</option>`).join('');
+                    if (data.interfaces.includes(previous)) select.value = previous;
+                }
+            } catch (e) { /* keep the default options */ }
+        }
+
         function setStatus(msg, color) {
             const el = document.getElementById('status-msg');
             el.textContent = msg;
@@ -789,6 +806,7 @@
         }
 
         // Rebuild from the server on load: this is the reattach.
+        loadInterfaces();
         refreshTests().then(pollOutput);
         setInterval(refreshTests, 3000);
         setInterval(pollOutput, 1000);

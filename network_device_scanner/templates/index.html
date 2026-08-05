@@ -481,6 +481,23 @@
         let autoRefreshTimer = null;
         let scanning = false;
 
+        // Populates the Bind Interface dropdown from real interfaces on this host.
+        // If detection is unavailable (off-Linux dev, no iproute2, or the request
+        // simply fails) the static wlan0/eth0 options already in the markup are
+        // left in place rather than cleared out.
+        async function loadInterfaces() {
+            const select = document.getElementById('interface');
+            try {
+                const res = await fetch('api/interfaces', { cache: 'no-store' });
+                const data = await res.json();
+                if (data.success && data.interfaces && data.interfaces.length) {
+                    const previous = select.value;
+                    select.innerHTML = data.interfaces.map((i) => `<option value="${i}">${i}</option>`).join('');
+                    if (data.interfaces.includes(previous)) select.value = previous;
+                }
+            } catch (e) { /* keep the default options */ }
+        }
+
         function showStatus(msg, color) {
             const sb = document.getElementById('status-bar');
             sb.innerHTML = msg;
@@ -572,6 +589,7 @@
         }
 
         // Initial load: show any cached result immediately without forcing a scan.
+        loadInterfaces();
         loadCached();
     </script>
 </body>

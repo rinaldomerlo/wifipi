@@ -50,6 +50,12 @@ Project Root Structure:
 ### B. iPerf3 Congestion Generator (`iperf_congestion_generator`)
 - **Purpose**: Provides a web interface to start, monitor, and stop `iperf3` client test streams across network interfaces.
 - **Real-time Streaming**: Uses Server-Sent Events (SSE) to stream live stdout/stderr from `iperf3` processes to the browser UI.
+- **Bind Interface detection**: `get_bindable_interfaces()` (`GET /interfaces`) lists real interfaces with a
+  live IPv4 address via `ip -4 -o addr show scope global` (read-only, no privilege needed) rather than a
+  hardcoded `wlan0`/`eth0` allowlist — matters on boxes with more than one radio (e.g. `wlan0`-`wlan4` on
+  the porcupine Pi) or a non-default interface name. `[]` (off-Linux, no iproute2) is treated as "can't
+  verify" everywhere it's consulted, not "no interfaces exist" — the static `wlan0`/`eth0` `<option>`s
+  already in the template stay as a fallback the dropdown never fully loses.
 
 ### C. iPerf3 Server Manager (`iperf_server_manager`)
 - **Purpose**: Provides a web interface to discover, launch, stop, restart, and monitor running `iperf3` server daemons and systemd service units (e.g. `iperf3-5202.service`).
@@ -127,6 +133,8 @@ Project Root Structure:
   also accepted for a no-Nginx dev-to-dev test.
 - **System Privilege Requirement**: None — only shells out to `nmap` for the optional LAN scan, same as
   `iperf_congestion_generator`.
+- **Bind Interface detection**: same `get_bindable_interfaces()`/`GET /interfaces` pattern as
+  `iperf_congestion_generator` — see section B.
 
 ### F. Client Simulator (`client_simulator`)
 - **Purpose**: Simulates many independent clients behind a single WiFi association, per the "NAT mode"
@@ -191,6 +199,9 @@ Project Root Structure:
 - **Caching**: the last scan result is kept in a module-level `last_scan` dict so `GET /api/devices` can
   return it instantly (used for the initial page load and the UI's auto-refresh poll) without forcing a
   new privileged scan on every request; `POST /api/scan` is what actually triggers `scan_lan()`.
+- **Bind Interface detection**: `get_bindable_interfaces()`/`GET /api/interfaces` (`/api/`-prefixed here,
+  matching this app's own route convention, unlike the unprefixed `/interfaces` in section B/E) — same
+  underlying pattern otherwise.
 - **System Privilege Requirement**: Executes `sudo nmap -sn ...`. Needs a sudoers rule even when running
   as a non-root user (its systemd unit runs as the app user, not root, since unlike `client_simulator` it
   has no other need for root):

@@ -37,6 +37,31 @@ def get_hostname() -> str:
         return "unknown-host"
 
 
+def get_bindable_interfaces() -> list:
+    """Real network interfaces with a live IPv4 address, i.e. usable as a scan-bind
+    target -- excludes loopback and anything with no address (down, unconfigured,
+    monitor-mode, etc.), since those can't be scanned through anyway. Read-only
+    (`ip addr show`), so no privilege is needed. Returns [] off-Linux or without
+    iproute2 installed; callers treat that as "can't verify" rather than "none exist".
+    """
+    if not shutil.which("ip"):
+        return []
+    try:
+        out = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show", "scope", "global"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return []
+
+    interfaces = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] not in interfaces:
+            interfaces.append(parts[1])
+    return interfaces
+
+
 def get_subnet_cidr(bind_interface: str) -> tuple[str, set]:
     """
     Resolve the IPv4 CIDR of bind_interface (e.g. "192.168.1.0/24") plus the
@@ -141,8 +166,9 @@ def scan_lan(bind_interface: str = "wlan0") -> dict:
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    if bind_interface not in ("wlan0", "eth0"):
-        bind_interface = "wlan0"
+    detected = get_bindable_interfaces()
+    if detected and bind_interface not in detected:
+        bind_interface = detected[0]
 
     cidr, local_ips = get_subnet_cidr(bind_interface)
 
@@ -195,6 +221,12 @@ def index():
 def api_hostname():
     """Expose the host name so the static landing page can display it too."""
     return jsonify({"hostname": get_hostname()})
+
+
+@app.route("/api/interfaces", methods=["GET"])
+def api_interfaces():
+    """Real interfaces with a live IPv4 address, for the Bind Interface dropdown."""
+    return jsonify({"success": True, "interfaces": get_bindable_interfaces()})
 
 
 @app.route("/api/devices", methods=["GET"])

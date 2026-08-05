@@ -70,13 +70,39 @@ def is_valid_ip(ip: str) -> bool:
     return bool(re.match(pattern, ip))
 
 
+def get_bindable_interfaces() -> list:
+    """Real network interfaces with a live IPv4 address, i.e. usable as a scan-bind
+    target -- excludes loopback and anything with no address (down, unconfigured,
+    monitor-mode, etc.), since those can't be scanned through anyway. Read-only
+    (`ip addr show`), so no privilege is needed. Returns [] off-Linux or without
+    iproute2 installed; callers treat that as "can't verify" rather than "none exist".
+    """
+    if not shutil.which("ip"):
+        return []
+    try:
+        out = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show", "scope", "global"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return []
+
+    interfaces = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] not in interfaces:
+            interfaces.append(parts[1])
+    return interfaces
+
+
 def scan_for_servers(bind_interface: str = "wlan0") -> list[dict]:
     """Scan the LAN for other Pis running this app (port 5004 open), excluding local host IPs."""
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
-    if bind_interface not in ("wlan0", "eth0"):
-        bind_interface = "wlan0"
+    detected = get_bindable_interfaces()
+    if detected and bind_interface not in detected:
+        bind_interface = detected[0]
 
     local_ips = {"127.0.0.1"}
 
@@ -249,6 +275,12 @@ def index():
 def api_hostname():
     """Expose the host name so the static landing page can display it too."""
     return jsonify({"hostname": get_hostname()})
+
+
+@app.route("/interfaces")
+def list_interfaces():
+    """Real interfaces with a live IPv4 address, for the Bind Interface dropdown."""
+    return jsonify({"success": True, "interfaces": get_bindable_interfaces()})
 
 
 @app.route("/content/manifest.json")

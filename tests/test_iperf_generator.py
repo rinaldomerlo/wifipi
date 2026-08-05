@@ -115,6 +115,9 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
 
         # Mock ip addr response then nmap response
         ip_addr_stdout = "inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+        # `ip -o addr show` (used by get_bindable_interfaces) is one address per line
+        # with a fixed "<idx>: <ifname> ..." prefix, unlike the plain fixture above.
+        ip_addr_oneline_stdout = "2: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
         nmap_stdout = (
             "# Nmap scan report\n"
             "Host: 192.168.1.100 ()\tPorts: 5201/open/tcp//iperf3///, 5202/open/tcp//iperf3///, 5204/open/tcp//iperf3///\n"
@@ -125,7 +128,7 @@ class TestIPerfCongestionGenerator(unittest.TestCase):
         def side_effect(cmd, **kwargs):
             m = MagicMock()
             if cmd[0] == "ip":
-                m.stdout = ip_addr_stdout
+                m.stdout = ip_addr_oneline_stdout if "-o" in cmd else ip_addr_stdout
             elif cmd[0] == "nmap":
                 m.stdout = nmap_stdout
             return m
@@ -256,6 +259,35 @@ class TestConcurrentTestRegistry(unittest.TestCase):
         self.assertIn('refreshTests', html)
         self.assertIn('tab-title', html)
         self.assertNotIn('EventSource', html)
+
+    @patch('iperf_congestion_generator.app.shutil.which')
+    @patch('iperf_congestion_generator.app.subprocess.run')
+    def test_get_bindable_interfaces_parses_oneline_output(self, mock_sub_run, mock_which):
+        mock_which.return_value = '/usr/sbin/ip'
+        mock_sub_run.return_value = MagicMock(stdout=(
+            "2: eth0    inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0\n"
+            "3: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+        ))
+        self.assertEqual(gen_app_module.get_bindable_interfaces(), ['eth0', 'wlan0'])
+
+    @patch('iperf_congestion_generator.app.shutil.which', return_value=None)
+    def test_get_bindable_interfaces_without_ip_binary(self, mock_which):
+        self.assertEqual(gen_app_module.get_bindable_interfaces(), [])
+
+    def test_interfaces_route(self):
+        response = self.client.get('/interfaces')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIn('interfaces', data)
+
+    @patch('iperf_congestion_generator.app.get_bindable_interfaces', return_value=['wlan0', 'eth0'])
+    def test_start_route_rejects_unknown_interface(self, mock_ifaces):
+        response = self.client.post('/start', json={
+            "server_ip": "192.168.1.5", "bind_interface": "wlan9",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('wlan9', response.get_json()['error'])
 
 
 if __name__ == '__main__':
