@@ -109,31 +109,22 @@
         .card-header-title h2 { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.6rem; }
         .card-header-title h2 i { color: var(--color-blue); }
 
-        /* Connection hero */
-        .conn-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; }
-        .conn-hero-left { display: flex; align-items: center; gap: 1.25rem; }
-        .conn-icon-ring {
-            width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            background: rgba(0, 230, 118, 0.1); border: 2px solid rgba(0, 230, 118, 0.35); position: relative; flex-shrink: 0;
-            transition: all 0.3s ease;
-        }
-        .conn-icon-ring.disconnected { background: rgba(255, 59, 116, 0.08); border-color: rgba(255, 59, 116, 0.3); }
-        .conn-icon-ring i { font-size: 1.6rem; color: var(--color-green); }
-        .conn-icon-ring.disconnected i { color: var(--color-pink); }
-        .conn-icon-ring:not(.disconnected)::after {
-            content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid rgba(0, 230, 118, 0.25);
-            animation: pulse-ring 2.4s ease-out infinite;
-        }
-        @keyframes pulse-ring { 0% { transform: scale(0.9); opacity: 0.8; } 100% { transform: scale(1.35); opacity: 0; } }
-        .conn-ssid { font-family: var(--font-heading); font-size: 1.4rem; font-weight: 700; }
-        .conn-meta { display: flex; gap: 1.25rem; margin-top: 0.35rem; color: var(--text-secondary); font-size: 0.85rem; flex-wrap: wrap; }
-        .conn-meta span { display: inline-flex; align-items: center; gap: 0.4rem; }
-        .conn-meta i { color: var(--color-blue); width: 14px; }
+        /* Interfaces overview */
+        .iface-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-family: var(--font-heading); }
+        .iface-name i { color: var(--color-blue); }
+        .cell-muted { color: var(--text-muted); font-style: italic; }
 
-        .stats-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0 0; }
-        .stat-box { background: rgba(8, 9, 15, 0.5); border: 1px solid var(--glass-border); border-radius: 14px; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
-        .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
-        .stat-value { font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700; color: var(--color-blue); }
+        /* Target-interface selector, in a card header */
+        .header-select-group { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .header-select-group label { font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; }
+        select {
+            padding: 0.5rem 0.85rem; border-radius: 8px; border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6); color: var(--text-primary); font-family: var(--font-main);
+            font-size: 0.85rem; font-weight: 500; outline: none;
+        }
+        select:focus { border-color: var(--color-blue); box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15); }
+        select option { background-color: var(--bg-light); color: var(--text-primary); }
+        .header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 
         .btn {
             border: none; outline: none; font-family: var(--font-main); font-weight: 600; font-size: 0.88rem; padding: 0.65rem 1.2rem;
@@ -159,6 +150,8 @@
         td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--glass-border); vertical-align: middle; }
         tr:hover td { background: rgba(255, 255, 255, 0.02); }
         tr.row-connected td { background: rgba(0, 230, 118, 0.05); }
+        tr[data-net-ssid] { cursor: pointer; }
+        tr.row-selected td { background: rgba(0, 210, 255, 0.08); box-shadow: inset 3px 0 0 var(--color-blue); }
         .empty-row td { text-align: center; padding: 2.5rem; color: var(--text-secondary); font-style: italic; }
 
         .badge { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -246,8 +239,8 @@
         @media (max-width: 768px) {
             .app-header { flex-direction: column; align-items: stretch; }
             .logo { justify-content: center; }
-            .conn-hero { flex-direction: column; align-items: stretch; }
-            .conn-hero > button { width: 100%; justify-content: center; }
+            .header-select-group, .header-actions { width: 100%; }
+            .header-select-group select { flex: 1; }
         }
     </style>
 </head>
@@ -270,28 +263,37 @@
             </div>
         </header>
 
-        <!-- Connection status hero -->
+        <!-- Interfaces overview -->
         <div class="glass-card">
-            <div class="conn-hero">
-                <div class="conn-hero-left">
-                    <div class="conn-icon-ring disconnected" id="connIconRing"><i class="fa-solid fa-wifi"></i></div>
-                    <div>
-                        <div class="conn-ssid" id="connSsid">Loading&hellip;</div>
-                        <div class="conn-meta" id="connMeta"></div>
-                    </div>
-                </div>
-                <button class="btn btn-red" id="disconnectBtn" style="display:none;">
-                    <i class="fa-solid fa-plug-circle-xmark"></i> Disconnect
-                </button>
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-microchip"></i> Interfaces</h2>
             </div>
-            <div class="stats-summary" id="connStats" style="display:none;"></div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr><th>Interface</th><th>Status</th><th>IP</th><th>Signal</th><th>Band &middot; Channel</th><th style="text-align:right;">Action</th></tr>
+                    </thead>
+                    <tbody id="interfacesBody">
+                        <tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Available networks -->
         <div class="glass-card">
             <div class="card-header-title">
                 <h2><i class="fa-solid fa-magnifying-glass"></i> Available Networks</h2>
-                <button class="btn btn-blue btn-sm" id="rescanBtn"><i class="fa-solid fa-arrows-rotate"></i> Rescan</button>
+                <div class="header-actions">
+                    <div class="header-select-group">
+                        <label for="targetInterface">scan/connect on:</label>
+                        <select id="targetInterface">
+                            <option value="">Detecting&hellip;</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" id="connectAllBtn"><i class="fa-solid fa-layer-group"></i> Connect all idle</button>
+                    <button class="btn btn-blue btn-sm" id="rescanBtn"><i class="fa-solid fa-arrows-rotate"></i> Rescan</button>
+                </div>
             </div>
             <div class="refresh-row">
                 <div class="scan-status">
@@ -370,12 +372,10 @@
     const scanStatusText = document.getElementById('scanStatusText');
     const networksBody = document.getElementById('networksBody');
     const savedBody = document.getElementById('savedBody');
+    const interfacesBody = document.getElementById('interfacesBody');
     const rescanBtn = document.getElementById('rescanBtn');
-    const disconnectBtn = document.getElementById('disconnectBtn');
-    const connIconRing = document.getElementById('connIconRing');
-    const connSsid = document.getElementById('connSsid');
-    const connMeta = document.getElementById('connMeta');
-    const connStats = document.getElementById('connStats');
+    const connectAllBtn = document.getElementById('connectAllBtn');
+    const targetInterface = document.getElementById('targetInterface');
 
     const modal = document.getElementById('connectModal');
     const modalSsid = document.getElementById('modalSsid');
@@ -395,9 +395,13 @@
     const revealCopyBtn = document.getElementById('revealCopyBtn');
 
     let pendingConnectSsid = null;
+    let pendingConnectMode = 'single'; // 'single' -> api/connect, 'all' -> api/connect-all
     let scanning = false;
     let savedNetworkNames = new Set();
-    let currentConnectionName = null;
+    let connectedSsids = new Set();   // SSIDs currently connected on ANY interface
+    let ifaceSsidMap = {};            // interface -> connected ssid
+    let selectedNetwork = null;       // { ssid, security } — target for "Connect all idle"
+    let userSelectedInterface = false;
     let lastSavedData = null;
 
     function showToast(message, isError) {
@@ -440,44 +444,91 @@
     }
 
     function renderStatus(data) {
+        connectedSsids = new Set();
+        ifaceSsidMap = {};
+
         if (!data.success) {
-            connSsid.textContent = data.error || 'Unable to read connection status';
-            connMeta.innerHTML = '';
-            connStats.style.display = 'none';
-            disconnectBtn.style.display = 'none';
-            connIconRing.classList.add('disconnected');
-            currentConnectionName = null;
+            interfacesBody.innerHTML = `<tr class="empty-row"><td colspan="6">${escapeHtml(data.error || 'Unable to read connection status')}</td></tr>`;
             renderSavedTable();
             return;
         }
 
-        if (!data.connected) {
-            connSsid.textContent = 'Not Connected';
-            connMeta.innerHTML = `<span><i class="fa-solid fa-ethernet"></i> ${escapeHtml(data.interface || 'no interface')}</span>`;
-            connStats.style.display = 'none';
-            disconnectBtn.style.display = 'none';
-            connIconRing.classList.add('disconnected');
-            currentConnectionName = null;
-            renderSavedTable();
-            return;
+        const interfaces = data.interfaces || [];
+        interfaces.forEach(ifc => {
+            if (ifc.connected && ifc.ssid) {
+                connectedSsids.add(ifc.ssid);
+                ifaceSsidMap[ifc.interface] = ifc.ssid;
+            }
+        });
+
+        if (!interfaces.length) {
+            interfacesBody.innerHTML = '<tr class="empty-row"><td colspan="6">No wireless interface detected.</td></tr>';
+        } else {
+            interfacesBody.innerHTML = interfaces.map(ifc => {
+                const strength = ifc.connected && ifc.signal != null ? signalStrength(ifc.signal) : 0;
+                const statusCell = ifc.connected
+                    ? `${escapeHtml(ifc.ssid)} <span class="badge badge-connected">Connected</span>`
+                    : '<span class="cell-muted">Not connected</span>';
+                const ipCell = ifc.connected ? escapeHtml(ifc.ip_address || 'no IP') : '<span class="cell-muted">&mdash;</span>';
+                const signalCell = ifc.connected && ifc.signal != null
+                    ? `${signalBarsHtml(strength)} <span class="badge badge-signal ${signalBadgeClass(strength)}">${ifc.signal}%</span>`
+                    : '<span class="cell-muted">&mdash;</span>';
+                const bandChanCell = ifc.connected
+                    ? `${escapeHtml(ifc.band || '?')} &middot; Ch ${ifc.channel != null ? ifc.channel : '?'}`
+                    : '<span class="cell-muted">&mdash;</span>';
+                const actionCell = ifc.connected
+                    ? `<button class="btn btn-red btn-sm" data-disconnect-iface="${escapeHtml(ifc.interface)}"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
+                    : '';
+                return `
+                    <tr class="${ifc.connected ? 'row-connected' : ''}">
+                        <td class="iface-name"><i class="fa-solid fa-ethernet"></i> ${escapeHtml(ifc.interface)}</td>
+                        <td>${statusCell}</td>
+                        <td>${ipCell}</td>
+                        <td>${signalCell}</td>
+                        <td>${bandChanCell}</td>
+                        <td style="text-align:right;">${actionCell}</td>
+                    </tr>`;
+            }).join('');
         }
 
-        connIconRing.classList.remove('disconnected');
-        connSsid.textContent = data.ssid;
-        connMeta.innerHTML = `
-            <span><i class="fa-solid fa-globe"></i> ${escapeHtml(data.ip_address || 'no IP')}</span>
-            <span><i class="fa-solid fa-signal"></i> ${data.signal != null ? data.signal + '%' : 'n/a'}</span>
-            <span><i class="fa-solid fa-lock"></i> ${escapeHtml(data.security)}</span>
-        `;
-        connStats.style.display = 'grid';
-        connStats.innerHTML = `
-            <div class="stat-box"><span class="stat-label">Interface</span><span class="stat-value">${escapeHtml(data.interface)}</span></div>
-            <div class="stat-box"><span class="stat-label">Band / Channel</span><span class="stat-value">${escapeHtml(data.band || '?')} &middot; Ch ${data.channel != null ? data.channel : '?'}</span></div>
-            <div class="stat-box"><span class="stat-label">Security</span><span class="stat-value">${escapeHtml(data.security)}</span></div>
-        `;
-        disconnectBtn.style.display = 'inline-flex';
-        currentConnectionName = data.connection_name || data.ssid;
         renderSavedTable();
+    }
+
+    // Populate the target-interface selector for scanning/connecting. Defaults to the
+    // first idle interface (falling back to the first interface); a manual choice by
+    // the operator is preserved across calls rather than being reset on every refresh.
+    async function loadInterfaces() {
+        try {
+            const res = await fetch('api/interfaces', { cache: 'no-store' });
+            const data = await res.json();
+            const list = (data.success && data.interfaces) ? data.interfaces : [];
+            const previousValue = targetInterface.value;
+
+            if (!list.length) {
+                targetInterface.innerHTML = '<option value="">No wireless interface found</option>';
+                return;
+            }
+
+            targetInterface.innerHTML = list.map(i => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join('');
+
+            if (userSelectedInterface && list.includes(previousValue)) {
+                targetInterface.value = previousValue;
+            } else {
+                const idle = list.find(i => !ifaceSsidMap[i]);
+                targetInterface.value = idle || list[0];
+            }
+        } catch (e) {
+            targetInterface.innerHTML = '<option value="">Failed to detect interfaces</option>';
+        }
+    }
+
+    // Mark a scanned network as the target for the "Connect all idle" bulk action.
+    function selectNetwork(ssid, security) {
+        selectedNetwork = { ssid, security };
+        networksBody.querySelectorAll('tr[data-net-ssid]').forEach(tr => {
+            tr.classList.toggle('row-selected', tr.getAttribute('data-net-ssid') === ssid);
+        });
+        connectAllBtn.title = `Connect all idle interfaces to ${ssid}`;
     }
 
     function renderNetworks(data) {
@@ -492,16 +543,20 @@
         } else {
             networksBody.innerHTML = data.networks.map(net => {
                 const strength = signalStrength(net.signal);
-                const connectedRow = net.connected;
-                const actionCell = connectedRow
-                    ? `<button class="btn btn-red btn-sm" data-disconnect="1"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
+                // net.connected reflects the scanned (target) interface only; the badge
+                // instead reflects whether ANY interface is on this SSID.
+                const connectedHere = net.connected;
+                const connectedAnywhere = connectedSsids.has(net.ssid);
+                const isSelected = !!selectedNetwork && selectedNetwork.ssid === net.ssid;
+                const actionCell = connectedHere
+                    ? `<button class="btn btn-red btn-sm" data-disconnect-iface="${escapeHtml(data.interface)}"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
                     : `<button class="btn btn-blue btn-sm" data-connect-ssid="${escapeHtml(net.ssid)}" data-connect-security="${escapeHtml(net.security)}"><i class="fa-solid fa-plug"></i> Connect</button>`;
                 return `
-                    <tr class="${connectedRow ? 'row-connected' : ''}">
+                    <tr class="${connectedHere ? 'row-connected' : ''} ${isSelected ? 'row-selected' : ''}" data-net-ssid="${escapeHtml(net.ssid)}" data-net-security="${escapeHtml(net.security)}">
                         <td class="ssid-cell">
                             ${net.security !== 'Open' ? '<i class="fa-solid fa-lock"></i>' : ''}
                             ${escapeHtml(net.ssid)}
-                            ${connectedRow ? '<span class="badge badge-connected">Connected</span>' : ''}
+                            ${connectedAnywhere ? '<span class="badge badge-connected">Connected</span>' : ''}
                         </td>
                         <td>${signalBarsHtml(strength)} <span class="badge badge-signal ${signalBadgeClass(strength)}">${net.signal}%</span></td>
                         <td>${securityBadge(net.security)}</td>
@@ -537,9 +592,10 @@
             return;
         }
         savedBody.innerHTML = data.saved.map(s => {
-            const isConnected = !!currentConnectionName && s.name === currentConnectionName;
+            const isConnected = connectedSsids.has(s.name);
+            const connectedIface = Object.keys(ifaceSsidMap).find(i => ifaceSsidMap[i] === s.name) || '';
             const connectAction = isConnected
-                ? `<button class="btn btn-red btn-sm" data-disconnect="1"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
+                ? `<button class="btn btn-red btn-sm" data-disconnect-iface="${escapeHtml(connectedIface)}"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
                 : `<button class="btn btn-blue btn-sm" data-connect-saved="${escapeHtml(s.name)}"><i class="fa-solid fa-plug"></i> Connect</button>`;
             return `
                 <tr class="${isConnected ? 'row-connected' : ''}">
@@ -577,7 +633,9 @@
         scanPulse.classList.remove('idle');
         scanStatusText.textContent = 'Scanning for networks…';
         try {
-            const res = await fetch('api/scan');
+            const iface = targetInterface.value;
+            const url = iface ? `api/scan?interface=${encodeURIComponent(iface)}` : 'api/scan';
+            const res = await fetch(url);
             renderNetworks(await res.json());
         } catch (e) {
             renderNetworks({ success: false, error: 'Network error while scanning.' });
@@ -597,15 +655,19 @@
         }
     }
 
-    function refreshAll() {
-        fetchStatus();
+    // Sequenced so the target-interface default (first idle interface) can be computed
+    // from fresh status data, then the scan runs against whichever interface that picked.
+    async function refreshAll() {
+        await fetchStatus();
+        await loadInterfaces();
         fetchScan();
         fetchSaved();
     }
 
-    function openConnectModal(ssid, security) {
+    function openConnectModal(ssid, security, mode) {
         pendingConnectSsid = ssid;
-        modalSsid.textContent = `Connect to ${ssid}`;
+        pendingConnectMode = mode || 'single';
+        modalSsid.textContent = pendingConnectMode === 'all' ? `Connect all idle to ${ssid}` : `Connect to ${ssid}`;
         modalHint.textContent = `Security: ${security}`;
         modalError.classList.remove('show');
         pwInput.value = '';
@@ -616,6 +678,7 @@
     function closeConnectModal() {
         modal.classList.remove('show');
         pendingConnectSsid = null;
+        pendingConnectMode = 'single';
     }
 
     async function connect(ssid, password) {
@@ -623,7 +686,7 @@
             const res = await fetch('api/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ssid, password })
+                body: JSON.stringify({ ssid, password, interface: targetInterface.value })
             });
             const data = await res.json();
             if (data.success) {
@@ -649,17 +712,54 @@
         }
     }
 
-    async function disconnect() {
-        disconnectBtn.disabled = true;
+    async function connectAll(ssid, password) {
         try {
-            const res = await fetch('api/disconnect', { method: 'POST' });
+            const res = await fetch('api/connect-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ssid, password })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const isFailure = data.connected === 0 && data.failed > 0;
+                showToast(`Connected ${data.connected}, failed ${data.failed}.`, isFailure);
+                closeConnectModal();
+                refreshAll();
+            } else {
+                const message = data.error || 'Connect-all failed.';
+                if (modal.classList.contains('show')) {
+                    modalError.textContent = message;
+                    modalError.classList.add('show');
+                } else {
+                    showToast(message, true);
+                }
+            }
+        } catch (e) {
+            const message = 'Network error while connecting all interfaces.';
+            if (modal.classList.contains('show')) {
+                modalError.textContent = message;
+                modalError.classList.add('show');
+            } else {
+                showToast(message, true);
+            }
+        }
+    }
+
+    async function disconnect(iface, btn) {
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch('api/disconnect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ interface: iface })
+            });
             const data = await res.json();
             showToast(data.message || data.error, !data.success);
             refreshAll();
         } catch (e) {
             showToast('Network error while disconnecting.', true);
         } finally {
-            disconnectBtn.disabled = false;
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -750,12 +850,13 @@
                 // Open, or already saved — NetworkManager has (or needs no) credentials.
                 connect(ssid, '');
             } else {
-                openConnectModal(ssid, security);
+                openConnectModal(ssid, security, 'single');
             }
             return;
         }
-        if (e.target.closest('[data-disconnect]')) {
-            disconnect();
+        const disconnectBtn = e.target.closest('[data-disconnect-iface]');
+        if (disconnectBtn) {
+            disconnect(disconnectBtn.getAttribute('data-disconnect-iface'), disconnectBtn);
             return;
         }
         const forgetBtn = e.target.closest('[data-forget]');
@@ -766,6 +867,13 @@
         const revealBtn = e.target.closest('[data-reveal]');
         if (revealBtn) {
             revealPassword(revealBtn.getAttribute('data-reveal'));
+            return;
+        }
+        // Selecting a scanned-network row (outside its action button) sets the target
+        // for the "Connect all idle" bulk action in the card header.
+        const netRow = e.target.closest('tr[data-net-ssid]');
+        if (netRow && !e.target.closest('button')) {
+            selectNetwork(netRow.getAttribute('data-net-ssid'), netRow.getAttribute('data-net-security'));
         }
     });
 
@@ -780,12 +888,32 @@
     });
 
     rescanBtn.addEventListener('click', fetchScan);
-    disconnectBtn.addEventListener('click', disconnect);
+    connectAllBtn.addEventListener('click', () => {
+        if (!selectedNetwork) {
+            showToast('Click a network below first to choose a target for "Connect all idle".', true);
+            return;
+        }
+        const { ssid, security } = selectedNetwork;
+        if (security === 'Open' || savedNetworkNames.has(ssid)) {
+            connectAll(ssid, '');
+        } else {
+            openConnectModal(ssid, security, 'all');
+        }
+    });
+    targetInterface.addEventListener('change', () => {
+        userSelectedInterface = true;
+        fetchScan();
+    });
     modalCancel.addEventListener('click', closeConnectModal);
     modalClose.addEventListener('click', closeConnectModal);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeConnectModal(); });
     modalConnect.addEventListener('click', () => {
-        if (pendingConnectSsid) connect(pendingConnectSsid, pwInput.value);
+        if (!pendingConnectSsid) return;
+        if (pendingConnectMode === 'all') {
+            connectAll(pendingConnectSsid, pwInput.value);
+        } else {
+            connect(pendingConnectSsid, pwInput.value);
+        }
     });
     pwInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') modalConnect.click();

@@ -66,18 +66,32 @@ Project Root Structure:
 - **Backend**: A thin wrapper around NetworkManager's `nmcli` CLI, entirely — no `wpa_supplicant` or
   `dhcpcd` interaction. All output is parsed from `nmcli -t` (terse, colon-delimited) fields; colons
   embedded in SSIDs are backslash-escaped by `nmcli` and unescaped by `_split_terse()` in `app.py`.
-  - `GET /api/status` — current connection details for the detected WiFi device.
-  - `GET /api/scan` — `nmcli device wifi list --rescan yes`, de-duplicated by SSID: the connected BSSID
-    always wins (so mesh/repeater setups with one SSID on multiple APs don't lose the "Connected" state
-    behind a stronger unconnected AP), otherwise the strongest signal wins.
+  - **Multi-interface**: `get_wireless_interfaces()` enumerates every wifi-typed device from
+    `nmcli device status`, not just the first — a Pi with a USB dongle alongside its built-in radio gets
+    both. `GET /api/interfaces` exposes the list for the frontend's target-interface `<select>`.
+  - `GET /api/status` — per-interface connection status for *every* detected WiFi device, via the shared
+    `interface_status(iface)` helper, each scoped with `nmcli ... device wifi list ifname <iface>` so one
+    radio's scan results can't be mistaken for another's.
+  - `GET /api/scan` — `nmcli device wifi list ifname <iface> --rescan yes` against a chosen interface
+    (`?interface=`, default the first detected device; validated by `_valid_interface()` against the live
+    device list plus a `^[A-Za-z0-9_.-]+$` shape check before being interpolated into the nmcli command),
+    de-duplicated by SSID: the connected BSSID always wins (so mesh/repeater setups with one SSID on
+    multiple APs don't lose the "Connected" state behind a stronger unconnected AP), otherwise the
+    strongest signal wins.
   - `GET /api/saved` / `POST /api/forget` — saved connection profiles (`nmcli connection show`/`delete`).
   - `POST /api/autoconnect` — enable/disable NetworkManager's auto-connect per saved profile
     (`nmcli connection modify <name> autoconnect yes|no`), surfaced as a toggle switch in the Saved
     Networks table — useful for test-lab setups where unattended reconnection is unwanted.
-  - `POST /api/connect` / `POST /api/disconnect` — `nmcli device wifi connect` / `nmcli device disconnect`.
-    nmcli's stderr is mapped to a friendlier message (e.g. "Secrets were required..." → "Incorrect password.")
-    by `friendly_connect_error()`. The frontend skips the password modal when the SSID is open or matches
-    an already-saved profile (NetworkManager already has secrets for the latter).
+  - `POST /api/connect` / `POST /api/disconnect` — `nmcli device wifi connect` / `nmcli device disconnect`,
+    both accepting an optional `interface` in the JSON body (validated the same way as `/api/scan`;
+    defaults to the first detected device). nmcli's stderr is mapped to a friendlier message (e.g.
+    "Secrets were required..." → "Incorrect password.") by `friendly_connect_error()`. The frontend skips
+    the password modal when the SSID is open or matches an already-saved profile (NetworkManager already
+    has secrets for the latter).
+  - `POST /api/connect-all` — bulk-connects every wireless interface (or, with `only_idle` — the default
+    — just the ones not already associated) to one SSID/password in a simple loop, returning per-interface
+    `{interface, ok, message|error}` results plus `connected`/`failed` counts. Drives the "Connect all
+    idle" button in the Available Networks header.
 - **System Privilege Requirement**: Requires NetworkManager (`nmcli`) to be the active network backend —
   it will not work against the older `dhcpcd`/`wpa_supplicant` stack on pre-Bookworm Raspberry Pi OS images.
   Executes all state-changing calls via `sudo nmcli ...`.

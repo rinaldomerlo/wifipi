@@ -13,7 +13,7 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
 3. **iPerf3 Server Manager (`iperf_server_manager`)**  
    A web interface to discover, launch, stop, restart, and monitor running `iperf3` server daemons and systemd services across ports.
 4. **WiFi Connection Manager (`wifi_connection_manager`)**  
-   A web interface to scan for nearby WiFi networks, connect or disconnect the wireless interface, and manage saved network profiles via NetworkManager (`nmcli`).
+   A web interface to scan for nearby WiFi networks, connect or disconnect the wireless interface, and manage saved network profiles via NetworkManager (`nmcli`). Handles multiple wifi interfaces (e.g. a USB dongle alongside the built-in radio): per-interface status in an Interfaces panel, a target-interface selector for scanning/connecting, and a "Connect all idle" bulk action to join every unassociated radio to one SSID at once.
 5. **Web Browsing Simulator (`web_browsing_simulator`)**  
    A browser-based tool that simulates realistic, bursty web-browsing traffic (random page loads with think-time between them) against another Pi's randomized synthetic page corpus, complementing the iperf3 apps' sustained-throughput tests.
 6. **Client Simulator (`client_simulator`)**  

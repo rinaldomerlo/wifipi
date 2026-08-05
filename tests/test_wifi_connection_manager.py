@@ -73,19 +73,19 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertIsNone(out)
         self.assertIn("not installed", err)
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
-    def test_api_status_no_interface(self, mock_iface):
-        mock_iface.return_value = ""
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    def test_api_status_no_interface(self, mock_ifaces):
+        mock_ifaces.return_value = []
         response = self.client.get('/api/status')
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertFalse(data['success'])
         self.assertIn("No wireless interface", data['error'])
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_status_connected(self, mock_run, mock_iface):
-        mock_iface.return_value = "wlan0"
+    def test_api_status_connected(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
 
         def side_effect(args, timeout=None):
             if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
@@ -100,15 +100,45 @@ class TestWifiConnectionManager(unittest.TestCase):
         response = self.client.get('/api/status')
         data = response.get_json()
         self.assertTrue(data['success'])
-        self.assertTrue(data['connected'])
-        self.assertEqual(data['ssid'], 'HomeNetwork')
-        self.assertEqual(data['ip_address'], '192.168.1.42')
-        self.assertEqual(data['band'], '5GHz')
+        self.assertEqual(len(data['interfaces']), 1)
+        ifc = data['interfaces'][0]
+        self.assertTrue(ifc['connected'])
+        self.assertEqual(ifc['ssid'], 'HomeNetwork')
+        self.assertEqual(ifc['ip_address'], '192.168.1.42')
+        self.assertEqual(ifc['band'], '5GHz')
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_scan_dedupes_and_sorts_by_signal(self, mock_run, mock_iface):
-        mock_iface.return_value = "wlan0"
+    def test_api_status_multiple_interfaces(self, mock_run, mock_ifaces):
+        # Two wifi radios: wlan0 associated, wlan1 idle. /api/status must report both,
+        # each scoped to its own `device wifi list ifname <iface>` query.
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
+                if "wlan0" in args:
+                    return "*:HomeNetwork:80:WPA2:44:5220 MHz\n", None
+                return "", None  # wlan1: nothing in-use
+            if args[:3] == ["-t", "-f", "IP4.ADDRESS"]:
+                return "IP4.ADDRESS[1]:192.168.1.42/24\n", None
+            if args[:3] == ["-t", "-f", "GENERAL.CONNECTION"]:
+                return "GENERAL.CONNECTION:HomeNetwork\n", None
+            return "", None
+
+        mock_run.side_effect = side_effect
+        response = self.client.get('/api/status')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(len(data['interfaces']), 2)
+        by_iface = {ifc['interface']: ifc for ifc in data['interfaces']}
+        self.assertTrue(by_iface['wlan0']['connected'])
+        self.assertEqual(by_iface['wlan0']['ssid'], 'HomeNetwork')
+        self.assertFalse(by_iface['wlan1']['connected'])
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_scan_dedupes_and_sorts_by_signal(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
         mock_run.return_value = (
             " :Weak:20:WPA2:1:2412 MHz:AA:BB:CC:DD:EE:01\n"
             " :Strong:90:--:11:2462 MHz:AA:BB:CC:DD:EE:02\n"
@@ -124,13 +154,13 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertEqual(strong['signal'], 90)
         self.assertEqual(strong['security'], 'Open')
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_scan_keeps_connected_bssid_even_with_weaker_signal(self, mock_run, mock_iface):
+    def test_api_scan_keeps_connected_bssid_even_with_weaker_signal(self, mock_run, mock_ifaces):
         # Mesh/repeater setups can broadcast one SSID from multiple BSSIDs. The
         # connected one must win the de-dup even if a sibling AP reports a
         # stronger signal, or the UI loses track of which network is active.
-        mock_iface.return_value = "wlan0"
+        mock_ifaces.return_value = ["wlan0"]
         mock_run.return_value = (
             "*:MeshNet:40:WPA2:1:2412 MHz:AA:BB:CC:DD:EE:01\n"
             " :MeshNet:90:WPA2:11:2462 MHz:AA:BB:CC:DD:EE:02\n",
@@ -144,29 +174,139 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertTrue(mesh['connected'])
         self.assertEqual(mesh['signal'], 40)
 
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_scan_scopes_to_requested_interface(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+        mock_run.return_value = ("", None)
+        response = self.client.get('/api/scan?interface=wlan1')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['interface'], 'wlan1')
+        args = mock_run.call_args[0][0]
+        self.assertIn('ifname', args)
+        self.assertIn('wlan1', args)
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    def test_api_scan_unknown_interface_is_rejected(self, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
+        response = self.client.get('/api/scan?interface=wlan9')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown interface", response.get_json()['error'])
+
     def test_api_connect_requires_ssid(self):
         response = self.client.post('/api/connect', json={})
         self.assertEqual(response.status_code, 400)
         self.assertIn("SSID is required", response.get_json()['error'])
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_connect_bad_password_is_friendly(self, mock_run, mock_iface):
-        mock_iface.return_value = "wlan0"
+    def test_api_connect_bad_password_is_friendly(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
         mock_run.return_value = (None, "Secrets were required, but not provided.")
         response = self.client.post('/api/connect', json={"ssid": "HomeNetwork", "password": "wrong"})
         data = response.get_json()
         self.assertFalse(data['success'])
         self.assertEqual(data['error'], "Incorrect password.")
 
-    @patch('wifi_connection_manager.app.get_wireless_interface')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    def test_api_connect_unknown_interface_is_rejected(self, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
+        response = self.client.post('/api/connect', json={"ssid": "HomeNetwork", "interface": "wlan9"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown interface", response.get_json()['error'])
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_disconnect_success(self, mock_run, mock_iface):
-        mock_iface.return_value = "wlan0"
+    def test_api_connect_threads_requested_interface(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+        mock_run.return_value = ("", None)
+        response = self.client.post('/api/connect', json={"ssid": "HomeNetwork", "interface": "wlan1"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        args = mock_run.call_args[0][0]
+        self.assertIn('ifname', args)
+        self.assertIn('wlan1', args)
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_disconnect_success(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0"]
         mock_run.return_value = ("", None)
         response = self.client.post('/api/disconnect')
         data = response.get_json()
         self.assertTrue(data['success'])
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_disconnect_targets_requested_interface(self, mock_run, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+        mock_run.return_value = ("", None)
+        response = self.client.post('/api/disconnect', json={"interface": "wlan1"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        mock_run.assert_called_once_with(["device", "disconnect", "wlan1"], timeout=conn_app_module.CONNECT_TIMEOUT)
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    def test_api_interfaces_lists_wifi_devices(self, mock_ifaces):
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+        response = self.client.get('/api/interfaces')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['interfaces'], ["wlan0", "wlan1"])
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_get_wireless_interfaces_parses_device_status(self, mock_run):
+        mock_run.return_value = ("wlan0:wifi\nwlan1:wifi\neth0:ethernet\n", None)
+        self.assertEqual(conn_app_module.get_wireless_interfaces(), ["wlan0", "wlan1"])
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_connect_all_only_idle_reports_mixed_results(self, mock_run, mock_ifaces):
+        # wlan0 is already connected (excluded by only_idle); wlan1 and wlan2 are idle,
+        # one succeeds and one fails — the response must reflect both outcomes.
+        mock_ifaces.return_value = ["wlan0", "wlan1", "wlan2"]
+
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
+                if "wlan0" in args:
+                    return "*:HomeNetwork:80:WPA2:44:5220 MHz\n", None
+                return "", None
+            if args[:3] == ["-t", "-f", "IP4.ADDRESS"]:
+                return "", None
+            if args[:3] == ["-t", "-f", "GENERAL.CONNECTION"]:
+                return "", None
+            if args[:3] == ["device", "wifi", "connect"]:
+                if "wlan1" in args:
+                    return "", None
+                if "wlan2" in args:
+                    return None, "Secrets were required, but not provided."
+            return "", None
+
+        mock_run.side_effect = side_effect
+        response = self.client.post('/api/connect-all', json={"ssid": "HomeNetwork"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['connected'], 1)
+        self.assertEqual(data['failed'], 1)
+        results_by_iface = {r['interface']: r for r in data['results']}
+        self.assertEqual(set(results_by_iface.keys()), {"wlan1", "wlan2"})
+        self.assertTrue(results_by_iface['wlan1']['ok'])
+        self.assertFalse(results_by_iface['wlan2']['ok'])
+        self.assertEqual(results_by_iface['wlan2']['error'], "Incorrect password.")
+
+    def test_api_connect_all_requires_ssid(self):
+        response = self.client.post('/api/connect-all', json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("SSID is required", response.get_json()['error'])
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    def test_api_connect_all_no_interface(self, mock_ifaces):
+        mock_ifaces.return_value = []
+        response = self.client.post('/api/connect-all', json={"ssid": "HomeNetwork"})
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn("No wireless interface", data['error'])
 
     def test_api_forget_requires_name(self):
         response = self.client.post('/api/forget', json={})

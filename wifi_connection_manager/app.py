@@ -50,16 +50,30 @@ def _split_terse(line: str) -> list:
     return [f.replace("\\:", ":").replace("\\\\", "\\") for f in fields]
 
 
-def get_wireless_interface() -> str:
-    """Return the first WiFi-capable device name reported by nmcli, or '' if none."""
+def get_wireless_interfaces() -> list:
+    """Return every WiFi-capable device name reported by nmcli, or [] if none."""
     out, err = _run_nmcli(["-t", "-f", "DEVICE,TYPE", "device", "status"])
     if not out:
-        return ""
+        return []
+    interfaces = []
     for line in out.strip().splitlines():
         parts = _split_terse(line)
         if len(parts) >= 2 and parts[1] == "wifi":
-            return parts[0]
-    return ""
+            interfaces.append(parts[0])
+    return interfaces
+
+
+def get_wireless_interface() -> str:
+    """Return the first WiFi-capable device name reported by nmcli, or '' if none."""
+    ifaces = get_wireless_interfaces()
+    return ifaces[0] if ifaces else ""
+
+
+def _valid_interface(iface: str) -> bool:
+    """True if `iface` is a safe-looking device name that is actually a known wifi radio."""
+    if not iface or not re.match(r"^[A-Za-z0-9_.-]+$", iface):
+        return False
+    return iface in get_wireless_interfaces()
 
 
 def classify_security(security_field: str) -> str:
@@ -104,18 +118,19 @@ def api_hostname():
     return jsonify({"hostname": get_hostname()})
 
 
-@app.route("/api/status")
-def api_status():
-    """Report the current WiFi connection state for the detected interface."""
-    iface = get_wireless_interface()
-    if not iface:
-        return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
+@app.route("/api/interfaces")
+def api_interfaces():
+    """List every WiFi-capable device nmcli knows about, for the target-interface selector."""
+    return jsonify({"success": True, "interfaces": get_wireless_interfaces()})
 
+
+def interface_status(iface: str) -> dict:
+    """Report the current WiFi connection state for a single interface, scoped to it."""
     out, err = _run_nmcli(
-        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ", "device", "wifi", "list"]
+        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ", "device", "wifi", "list", "ifname", iface]
     )
     if err:
-        return jsonify({"success": False, "error": f"Failed to read connection status: {err}"}), 200
+        return {"interface": iface, "connected": False, "error": f"Failed to read connection status: {err}"}
 
     connected = None
     for line in (out or "").strip().splitlines():
@@ -135,7 +150,7 @@ def api_status():
             break
 
     if not connected:
-        return jsonify({"success": True, "connected": False, "interface": iface})
+        return {"interface": iface, "connected": False}
 
     ip_out, _ = _run_nmcli(["-t", "-f", "IP4.ADDRESS", "device", "show", iface])
     ip_address = None
@@ -145,18 +160,17 @@ def api_status():
         if len(ip_field) >= 2 and ip_field[1]:
             ip_address = ip_field[1].split("/")[0]
 
-    uptime_out, _ = _run_nmcli(["-t", "-f", "GENERAL.CONNECTION", "device", "show", iface])
+    conn_out, _ = _run_nmcli(["-t", "-f", "GENERAL.CONNECTION", "device", "show", iface])
     connection_name = None
-    if uptime_out:
-        first_line = uptime_out.strip().splitlines()[0] if uptime_out.strip() else ""
+    if conn_out:
+        first_line = conn_out.strip().splitlines()[0] if conn_out.strip() else ""
         conn_field = _split_terse(first_line)
         if len(conn_field) >= 2:
             connection_name = conn_field[1]
 
-    return jsonify({
-        "success": True,
-        "connected": True,
+    return {
         "interface": iface,
+        "connected": True,
         "connection_name": connection_name,
         "ssid": connected["ssid"],
         "ip_address": ip_address,
@@ -164,18 +178,34 @@ def api_status():
         "security": connected["security"],
         "channel": connected["channel"],
         "band": connected["band"],
-    })
+    }
+
+
+@app.route("/api/status")
+def api_status():
+    """Report the current WiFi connection state for every wireless interface on the system."""
+    interfaces = get_wireless_interfaces()
+    if not interfaces:
+        return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
+
+    return jsonify({"success": True, "interfaces": [interface_status(i) for i in interfaces]})
 
 
 @app.route("/api/scan")
 def api_scan():
-    """Scan for nearby WiFi networks on the detected interface."""
-    iface = get_wireless_interface()
+    """Scan for nearby WiFi networks on a chosen (or the default) interface."""
+    requested_iface = request.args.get("interface")
+    if requested_iface:
+        if not _valid_interface(requested_iface):
+            return jsonify({"success": False, "error": f"Unknown interface: {requested_iface}."}), 400
+        iface = requested_iface
+    else:
+        iface = get_wireless_interface()
     if not iface:
         return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
 
     out, err = _run_nmcli(
-        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ,BSSID", "device", "wifi", "list", "--rescan", "yes"],
+        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ,BSSID", "device", "wifi", "list", "ifname", iface, "--rescan", "yes"],
         timeout=NMCLI_TIMEOUT,
     )
     if err:
@@ -248,11 +278,17 @@ def api_connect():
     data = request.get_json(silent=True) or {}
     ssid = (data.get("ssid") or "").strip()
     password = data.get("password") or ""
+    requested_iface = data.get("interface")
 
     if not ssid:
         return jsonify({"success": False, "error": "SSID is required."}), 400
 
-    iface = get_wireless_interface()
+    if requested_iface:
+        if not _valid_interface(requested_iface):
+            return jsonify({"success": False, "error": f"Unknown interface: {requested_iface}."}), 400
+        iface = requested_iface
+    else:
+        iface = get_wireless_interface()
     if not iface:
         return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
 
@@ -269,8 +305,16 @@ def api_connect():
 
 @app.route("/api/disconnect", methods=["POST"])
 def api_disconnect():
-    """Disconnect the wireless interface from its current network."""
-    iface = get_wireless_interface()
+    """Disconnect a wireless interface from its current network."""
+    data = request.get_json(silent=True) or {}
+    requested_iface = data.get("interface")
+
+    if requested_iface:
+        if not _valid_interface(requested_iface):
+            return jsonify({"success": False, "error": f"Unknown interface: {requested_iface}."}), 400
+        iface = requested_iface
+    else:
+        iface = get_wireless_interface()
     if not iface:
         return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
 
@@ -279,6 +323,40 @@ def api_disconnect():
         return jsonify({"success": False, "error": f"Disconnect failed: {err}"}), 200
 
     return jsonify({"success": True, "message": "Disconnected."})
+
+
+@app.route("/api/connect-all", methods=["POST"])
+def api_connect_all():
+    """Connect every wireless interface (or just the idle ones) to the same SSID at once."""
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get("ssid") or "").strip()
+    password = data.get("password") or ""
+    only_idle = data.get("only_idle", True)
+
+    if not ssid:
+        return jsonify({"success": False, "error": "SSID is required."}), 400
+
+    ifaces = get_wireless_interfaces()
+    if not ifaces:
+        return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
+
+    if only_idle:
+        ifaces = [i for i in ifaces if not interface_status(i)["connected"]]
+
+    results = []
+    for iface in ifaces:
+        args = ["device", "wifi", "connect", ssid, "ifname", iface]
+        if password:
+            args += ["password", password]
+        out, err = _run_nmcli(args, timeout=CONNECT_TIMEOUT)
+        if err:
+            results.append({"interface": iface, "ok": False, "error": friendly_connect_error(err)})
+        else:
+            results.append({"interface": iface, "ok": True, "message": f"Connected to {ssid}."})
+
+    connected = sum(1 for r in results if r["ok"])
+    failed = len(results) - connected
+    return jsonify({"success": True, "results": results, "connected": connected, "failed": failed})
 
 
 @app.route("/api/forget", methods=["POST"])
