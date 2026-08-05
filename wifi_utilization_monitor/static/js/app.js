@@ -104,12 +104,33 @@ function initElements() {
 
 // Adjust canvas resolution for Retina displays
 function resizeCanvas(canvas) {
-    const rect = canvas.getBoundingClientRect();
+    fitCanvasToDisplay(canvas, canvas.getContext('2d'));
+}
+
+// Ensure a canvas's backing-store size matches its current CSS display size
+// times the device pixel ratio, and set (not accumulate) the DPR transform.
+// Called at the START of every draw so the grid is always rendered against the
+// canvas's true current size -- otherwise a resize or browser zoom leaves the
+// backing store out of sync with the display and stray grid-line segments get
+// drawn in the wrong place (visible as "artifacts" on the right of the chart).
+// getBoundingClientRect() forces a layout flush, so this reads the settled size
+// even when a resize event fires mid-layout. Only reassign width/height when they
+// actually change (reassigning clears the canvas), but always reset the transform.
+function fitCanvasToDisplay(canvas, ctx) {
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    // Clear the whole backing store in identity (device) space. Clearing under a
+    // scaled transform under-clears when dpr < 1 (browser zoomed out / fractional
+    // display scaling), leaving stale grid pixels in the right/bottom strips that
+    // accumulate across redraws -- the "artifacts" seen on the right of the chart.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Then draw in CSS pixels: 1 unit = 1 CSS px, mapped to dpr device px.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 // Set up UI listeners
@@ -529,12 +550,19 @@ async function triggerScan() {
             updateStatusWithCountdown();
         } else {
             console.error('Scan API failed', data.error);
+            // A genuine scan error means the previous scan's data is no longer
+            // valid. Clear the charts, table and metric tiles so stale networks
+            // aren't left drawn on the graph -- otherwise the old spectrum curves
+            // linger as "artifacts" over what should read as an empty/error view
+            // (the error status bar already explains what happened).
+            clearScanVisualization();
             state.lastStatusMessage = `Scan Error: ${data.error}`;
             state.lastStatusClass = 'idle';
             updateStatusText(state.lastStatusMessage, state.lastStatusClass);
         }
     } catch (e) {
         console.error('Scan request failed', e);
+        clearScanVisualization();
         state.lastStatusMessage = 'Scan request failed. Server offline?';
         state.lastStatusClass = 'idle';
         updateStatusText(state.lastStatusMessage, state.lastStatusClass);
@@ -650,6 +678,22 @@ function updateDashboardMetrics() {
     }
 }
 
+// Clear all scan visualization -- charts, table and metric tiles. Used when a
+// scan errors or the request fails, so the previous scan's networks aren't left
+// drawn as stale artifacts on what should read as an empty/error view.
+function clearScanVisualization() {
+    state.currentScanData = [];
+    state.meta = null;
+    renderCharts();
+    renderTable();
+    const totalEl = document.getElementById('statTotalAps');
+    if (totalEl) totalEl.textContent = '0';
+    ['statMinSignal', 'statAvgSignal', 'statMaxSignal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '-';
+    });
+}
+
 // Control display configurations for bands
 function updateBandVisibility() {
     const b = state.activeBand;
@@ -705,8 +749,9 @@ function drawSpectrum(canvasId, bandName) {
     const ctx = state.canvasContexts[canvasId];
     if (!canvas || !ctx || canvas.offsetParent === null) return;
 
-    // Clear with transparent layer
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Match the backing store to the current display size and clear it (handles
+    // fractional/<1 device pixel ratios correctly, unlike a scaled clearRect).
+    fitCanvasToDisplay(canvas, ctx);
 
     const w = canvas.width / (window.devicePixelRatio || 1);
     const h = canvas.height / (window.devicePixelRatio || 1);
@@ -958,7 +1003,9 @@ function drawUtilizationChart(canvasId, bandName) {
     const ctx = state.canvasContexts[canvasId];
     if (!canvas || !ctx || canvas.offsetParent === null) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Match the backing store to the current display size and clear it (handles
+    // fractional/<1 device pixel ratios correctly, unlike a scaled clearRect).
+    fitCanvasToDisplay(canvas, ctx);
 
     const w = canvas.width / (window.devicePixelRatio || 1);
     const h = canvas.height / (window.devicePixelRatio || 1);
