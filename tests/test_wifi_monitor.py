@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 import unittest
+from unittest.mock import patch
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -55,6 +56,27 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         json_data = response.get_json()
         self.assertIn('success', json_data)
+
+    def test_api_scan_empty_is_success_not_error(self):
+        # In an isolated environment (e.g. an RF chamber) a scan can legitimately
+        # find no APs. That is a successful, zero-network result -- not an error.
+        with patch('wifi_utilization_monitor.app.run_live_scan', return_value=('', None)):
+            response = self.client.get('/api/scan?interface=wlan0')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['records'], [])
+        self.assertEqual(data['meta']['total_aps'], 0)
+
+    def test_api_scan_command_failure_still_errors(self):
+        # A genuine scan failure (interface down, permission denied, timeout) must
+        # still surface as an error -- only *empty* results are treated as valid.
+        with patch('wifi_utilization_monitor.app.run_live_scan',
+                   return_value=(None, 'Command failed: iw dev wlan0 scan')):
+            response = self.client.get('/api/scan?interface=wlan0')
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn('Scan failed', data['error'])
 
 if __name__ == '__main__':
     unittest.main()

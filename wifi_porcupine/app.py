@@ -647,6 +647,7 @@ def api_output():
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
+    global log_total
     data = request.get_json(silent=True) or {}
 
     with run_lock:
@@ -731,6 +732,11 @@ def api_start():
                       "netns_clients": 0, "active_interfaces": 0})
         active_ifaces.clear()
         fleets.clear()
+    # Reset the log ring buffer so a new run's Live Activity starts clean rather
+    # than replaying the previous run's lines (the client polls api/output?since=0).
+    with log_lock:
+        log_lines.clear()
+        log_total = 0
     stop_event.clear()
 
     threading.Thread(target=start_run, args=(config,), daemon=True).start()

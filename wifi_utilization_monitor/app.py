@@ -59,9 +59,10 @@ def run_live_scan(interface, max_retries=2):
             # Run with sudo since iw scan requires root privileges.
             output = subprocess.check_output(cmd, stderr=subprocess.PIPE, timeout=12)
             raw = output.decode('utf-8', errors='replace')
-            if raw.strip():
-                return raw, None
-            last_error = "Scan returned empty output."
+            # A zero-exit scan is a completed scan; empty output is a valid result,
+            # not an error -- in an isolated environment (e.g. an RF chamber) there
+            # may simply be no APs in range. Only failures/timeouts (below) retry.
+            return raw, None
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
             last_error = f"Command failed: {' '.join(cmd)}\nError: {err_msg}"
@@ -158,12 +159,10 @@ def api_scan():
             'error': f"Scan failed: {error}"
         }), 200
 
+    # Empty results are valid (e.g. an RF chamber with no APs in range) -- fall
+    # through to a normal success response reporting zero networks rather than
+    # surfacing a scary error for what is a legitimately quiet environment.
     records = parse_scan_output(raw_output)
-    if not records:
-        return jsonify({
-            'success': False, 
-            'error': f"Scan executed on '{interface}' but returned empty results. Is the interface up?"
-        }), 200
 
     # Summarize stats for dashboard
     total_aps = len(records)
