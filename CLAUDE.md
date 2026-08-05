@@ -160,8 +160,10 @@ Any new screen added to this project inherits both the design system and the hos
   installed apps by probing each card's `/<app>/api/hostname`, so adding a new app means adding a
   `deploy/nginx.d/<app>.conf` snippet plus a landing-page card — no `/api/hostname` endpoints-array edit,
   discovery derives the probe from the card's `href`.
-- The landing page (`www/index.html`) shows a version badge stamped from `git describe` at commit time by
-  `.githooks/pre-commit` (enable once with `git config core.hooksPath .githooks`). Don't hand-edit the
-  value or remove the `<!--VERSION-->…<!--/VERSION-->` markers it writes between — bump the version by
-  tagging (`git tag vX.Y`) and let the hook stamp it. The Pi never runs git; it just serves the stamped file.
+- The landing page (`www/index.html`) and the WiFiMon header (`wifi_utilization_monitor/templates/index.html`)
+  each show a version badge/tag stamped from `git describe` at commit time by `.githooks/pre-commit`
+  (enable once with `git config core.hooksPath .githooks`), via `.githooks/stamp-version.sh` looping over
+  both files. Don't hand-edit the value or remove either file's `<!--VERSION-->…<!--/VERSION-->` markers —
+  bump the version by tagging (`git tag vX.Y`) and let the hook stamp it. The Pi never runs git; it just
+  serves the stamped files.
 - Do not commit or push unless asked.

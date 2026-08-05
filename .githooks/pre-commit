@@ -1,7 +1,7 @@
 #!/bin/sh
-# WiFiPi: stamp the current git version into the landing page on every commit,
-# so the static page served from the Pi always reports the deployed version
-# without the Pi (or nginx) ever running git.
+# WiFiPi: stamp the current git version into the version-badge pages on every
+# commit, so the static pages served from the Pi always report the deployed
+# version without the Pi (or nginx) ever running git.
 #
 # Enable once per clone with:
 #     git config core.hooksPath .githooks
@@ -16,8 +16,11 @@ VERSION="$(git describe --tags --always 2>/dev/null || echo unknown)"
 
 "$ROOT/.githooks/stamp-version.sh" "$VERSION"
 
-# Fold the refreshed page into this commit only if the version actually changed,
-# so ordinary commits that don't move the version don't drag www/index.html in.
-if ! git diff --quiet -- www/index.html; then
-    git add www/index.html
-fi
+# Fold each refreshed page into this commit only if its version actually
+# changed, so ordinary commits that don't move the version don't drag either
+# page in.
+for PAGE in www/index.html wifi_utilization_monitor/templates/index.html; do
+    if ! git diff --quiet -- "$PAGE"; then
+        git add "$PAGE"
+    fi
+done

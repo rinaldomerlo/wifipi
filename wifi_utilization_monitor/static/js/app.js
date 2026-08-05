@@ -19,8 +19,21 @@ const state = {
     lockedBssid: null,
     refreshIntervalId: null,
     canvasElements: {},
-    canvasContexts: {}
+    canvasContexts: {},
+    // Trailing signal history per BSSID for the trend rail: { [bssid]: [{t, dbm}, ...] }
+    signalHistory: {}
 };
+
+// How far back the trend rail keeps raw samples. A generous window (5 min) so
+// the EMA has plenty of history to smooth over even at slow refresh rates.
+const SIGNAL_HISTORY_WINDOW_MS = 5 * 60 * 1000;
+// EMA time constant -- ~20-30s keeps the trend responsive to a real signal
+// change within a few refreshes, while still smoothing out scan-to-scan jitter.
+const EMA_TAU_SECONDS = 25;
+// Compare "now" against the EMA value from this far back to compute the delta pill.
+const TREND_DELTA_WINDOW_SECONDS = 30;
+// Cap on how many strongest APs get a full trend card in the rail.
+const TREND_RAIL_MAX_APS = 6;
 
 // Frequency map constants
 const BANDS = {
@@ -532,13 +545,15 @@ async function triggerScan() {
         if (data.success) {
             state.currentScanData = data.records || [];
             state.meta = data.meta || null;
-            
+
             // 6 GHz band tab is always available
             document.getElementById('btnBand6').style.display = 'inline-block';
-            
+
+            updateSignalHistory(state.currentScanData);
             updateDashboardMetrics();
             renderCharts();
             renderTable();
+            renderTrendRail();
             
             // Set dynamic status details
             const modeLabel = state.meta.data_source.toLowerCase().includes('mock') ? 'mock' : 'live';
@@ -643,38 +658,21 @@ function updateStatusText(text, stateClass) {
     if (label) label.textContent = text;
 }
 
-// Populate stats cards
+// Flash/pulse animation on live-update, and anything else keyed off scan
+// metadata rather than the record list itself. Min/Avg/Max signal tiles were
+// removed in favor of the per-AP trend rail (aggregate signal stats are
+// meaningless in this app's primary use case: an RF chamber with only one or
+// two SSIDs in range) -- the surviving Total SSIDs figure is now updated by
+// renderTrendRail() instead, since it's rendered inside the rail.
 function updateDashboardMetrics() {
     if (!state.meta) return;
-    
-    document.getElementById('statTotalAps').textContent = state.meta.total_aps;
-    document.getElementById('statSourceDesc').textContent = `Total SSIDs seen live`;
-    
-    // Signal strength calculations (min, average, max)
-    const signals = state.currentScanData.map(r => r.signal_dbm).filter(s => s !== null);
-    if (signals.length > 0) {
-        const minSig = Math.min(...signals);
-        const maxSig = Math.max(...signals);
-        const avgSig = Math.round(signals.reduce((a, b) => a + b, 0) / signals.length);
-        
-        document.getElementById('statMinSignal').textContent = `${minSig} dBm`;
-        document.getElementById('statAvgSignal').textContent = `${avgSig} dBm`;
-        document.getElementById('statMaxSignal').textContent = `${maxSig} dBm`;
-    } else {
-        document.getElementById('statMinSignal').textContent = '-';
-        document.getElementById('statAvgSignal').textContent = '-';
-        document.getElementById('statMaxSignal').textContent = '-';
-    }
-    
-    document.getElementById('statLastUpdate').textContent = `Updated: ${state.meta.timestamp.split(' ')[1]}`;
 
-    // Flash/pulse animation on statistics row for live indication
-    const statsRow = document.querySelector('.stats-row');
-    if (statsRow) {
-        statsRow.classList.remove('pulse-update');
-        void statsRow.offsetWidth; // force reflow
-        statsRow.classList.add('pulse-update');
-        setTimeout(() => statsRow.classList.remove('pulse-update'), 600);
+    const rail = document.querySelector('.trend-rail');
+    if (rail) {
+        rail.classList.remove('pulse-update');
+        void rail.offsetWidth; // force reflow
+        rail.classList.add('pulse-update');
+        setTimeout(() => rail.classList.remove('pulse-update'), 600);
     }
 }
 
@@ -686,12 +684,168 @@ function clearScanVisualization() {
     state.meta = null;
     renderCharts();
     renderTable();
-    const totalEl = document.getElementById('statTotalAps');
-    if (totalEl) totalEl.textContent = '0';
-    ['statMinSignal', 'statAvgSignal', 'statMaxSignal'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = '-';
+    renderTrendRail(); // also resets #statTotalAps to 0 via the empty-records path
+}
+
+// Append this scan's readings to each BSSID's trailing signal history, then
+// prune samples older than the retention window. Deliberately prune by AGE
+// ONLY, not by presence in the latest scan -- an AP that transiently drops out
+// of a single scan (a common jitter artifact, not a real disappearance)
+// shouldn't have its trend card blanked immediately; it'll simply stop
+// accumulating new samples until it reappears, then pick back up.
+function updateSignalHistory(records) {
+    const now = Date.now();
+    records.forEach(rec => {
+        if (!rec.bssid || rec.signal_dbm === null || rec.signal_dbm === undefined) return;
+        const hist = state.signalHistory[rec.bssid] || (state.signalHistory[rec.bssid] = []);
+        hist.push({ t: now, dbm: rec.signal_dbm });
     });
+
+    const cutoff = now - SIGNAL_HISTORY_WINDOW_MS;
+    Object.keys(state.signalHistory).forEach(bssid => {
+        const pruned = state.signalHistory[bssid].filter(s => s.t >= cutoff);
+        if (pruned.length > 0) {
+            state.signalHistory[bssid] = pruned;
+        } else {
+            delete state.signalHistory[bssid];
+        }
+    });
+}
+
+// Time-constant EMA over a raw {t, dbm} series (ascending by t). Using a fixed
+// time-constant (tau) rather than a fixed per-sample alpha keeps the smoothing
+// behavior consistent regardless of the user's chosen refresh rate -- a slow
+// 30s refresh and a fast 3s refresh both converge at the same real-world pace.
+// Pure function: recomputed from raw history on every render rather than
+// maintained as separate stateful EMA storage, consistent with this app's
+// existing re-render-from-state style.
+function computeEmaSeries(history, tauSeconds = EMA_TAU_SECONDS) {
+    const out = [];
+    let ema = null;
+    let prevT = null;
+    history.forEach(sample => {
+        if (ema === null) {
+            ema = sample.dbm;
+        } else {
+            const dt = (sample.t - prevT) / 1000;
+            const alpha = 1 - Math.exp(-dt / tauSeconds);
+            ema = ema + alpha * (sample.dbm - ema);
+        }
+        prevT = sample.t;
+        out.push(ema);
+    });
+    return out;
+}
+
+// Render the right-hand rail: total AP count + top-N strongest APs' live
+// EMA-smoothed signal trend (current value, delta pill, raw+EMA sparkline).
+function renderTrendRail() {
+    const listEl = document.getElementById('trendRailList');
+    if (!listEl) return;
+
+    const records = state.currentScanData || [];
+
+    const totalEl = document.getElementById('statTotalAps');
+    if (totalEl) totalEl.textContent = records.length;
+
+    if (records.length === 0) {
+        listEl.innerHTML = '<p class="trend-empty">Waiting for scan data&hellip;</p>';
+        return;
+    }
+
+    // Strongest signal first, capped to keep the rail scannable.
+    const sorted = records.slice().sort((a, b) => b.signal_dbm - a.signal_dbm);
+    const shown = sorted.slice(0, TREND_RAIL_MAX_APS);
+
+    let html = '';
+    shown.forEach(rec => {
+        const hist = state.signalHistory[rec.bssid] || [{ t: Date.now(), dbm: rec.signal_dbm }];
+        const emaSeries = computeEmaSeries(hist);
+        const currentEma = Math.round(emaSeries[emaSeries.length - 1]);
+
+        // Delta vs. the EMA value from ~TREND_DELTA_WINDOW_SECONDS ago in the
+        // same series (nearest sample at-or-before that point in time).
+        const deltaTargetT = Date.now() - TREND_DELTA_WINDOW_SECONDS * 1000;
+        let pastEma = emaSeries[0];
+        for (let i = 0; i < hist.length; i++) {
+            if (hist[i].t <= deltaTargetT) pastEma = emaSeries[i];
+        }
+        const delta = Math.round(currentEma - pastEma);
+        const deltaClass = delta >= 0 ? 'up' : 'down';
+        const deltaArrow = delta >= 0 ? '▲' : '▼';
+        const deltaLabel = `${deltaArrow} ${delta >= 0 ? '+' : ''}${delta}/${TREND_DELTA_WINDOW_SECONDS}s`;
+
+        const rawStroke = getApColor(rec.ssid, rec.bssid, 0.3);
+        const emaStroke = getApColor(rec.ssid, rec.bssid, 1);
+        const spark = buildSparkline(hist, emaSeries, rawStroke, emaStroke);
+
+        const ssidLabel = rec.ssid || 'Hidden';
+        const channelLabel = rec.channel !== null && rec.channel !== undefined ? `ch ${rec.channel}` : '';
+        const bandLabel = rec.band || '';
+        const metaLabel = [bandLabel, channelLabel].filter(Boolean).join(' / ');
+
+        html += `
+            <div class="trend-block">
+                <div class="trend-top">
+                    <span class="trend-name">${ssidLabel}<span class="trend-meta">${metaLabel}</span></span>
+                    <span class="trend-delta ${deltaClass}">${deltaLabel}</span>
+                </div>
+                <div class="trend-value"><b>${currentEma}</b><span>dBm</span></div>
+                ${spark}
+                <div class="trend-legend">
+                    <span><i style="background:${rawStroke}"></i>raw</span>
+                    <span><i style="background:${emaStroke}"></i>EMA</span>
+                </div>
+            </div>
+        `;
+    });
+
+    const overflow = sorted.length - shown.length;
+    if (overflow > 0) {
+        html += `<p class="trend-overflow">+${overflow} more in the table below</p>`;
+    }
+
+    listEl.innerHTML = html;
+}
+
+// Build a two-trace inline SVG sparkline (thin translucent raw + bold EMA),
+// auto-scaled to this card's own recent min/max dBm range so small trends
+// stay visible rather than being flattened by the main chart's fixed -100/-20
+// dBm scale.
+function buildSparkline(hist, emaSeries, rawStroke, emaStroke) {
+    const width = 280;
+    const height = 60;
+
+    if (hist.length < 2) {
+        return `<svg class="trend-spark" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"></svg>`;
+    }
+
+    const rawVals = hist.map(s => s.dbm);
+    const allVals = rawVals.concat(emaSeries);
+    let minV = Math.min(...allVals);
+    let maxV = Math.max(...allVals);
+    if (minV === maxV) {
+        // Flat series -- pad the range so the line isn't drawn on the edge.
+        minV -= 1;
+        maxV += 1;
+    }
+
+    const minT = hist[0].t;
+    const maxT = hist[hist.length - 1].t;
+    const spanT = Math.max(1, maxT - minT);
+
+    const getX = (t) => ((t - minT) / spanT) * width;
+    const getY = (v) => height - ((v - minV) / (maxV - minV)) * height;
+
+    const rawPoints = hist.map(s => `${getX(s.t).toFixed(1)},${getY(s.dbm).toFixed(1)}`).join(' ');
+    const emaPoints = hist.map((s, i) => `${getX(s.t).toFixed(1)},${getY(emaSeries[i]).toFixed(1)}`).join(' ');
+
+    return `
+        <svg class="trend-spark" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+            <polyline points="${rawPoints}" fill="none" stroke="${rawStroke}" stroke-width="1.4" />
+            <polyline points="${emaPoints}" fill="none" stroke="${emaStroke}" stroke-width="2.5" stroke-linecap="round" />
+        </svg>
+    `;
 }
 
 // Control display configurations for bands
