@@ -125,9 +125,18 @@ def api_interfaces():
 
 
 def interface_status(iface: str) -> dict:
-    """Report the current WiFi connection state for a single interface, scoped to it."""
+    """Report the current WiFi connection state for a single interface, scoped to it.
+
+    `--rescan no` is deliberate: this only needs the already-associated AP's entry,
+    which NetworkManager keeps live from the active connection without a directed
+    scan. Without this flag, `device wifi list` may trigger a real over-the-air scan
+    (several seconds per radio); with /api/status walking every interface and being
+    polled every 10s, that turned into pile-ups of overlapping scans on multi-radio
+    boxes -- each new poll's scan colliding with the previous one still in flight.
+    """
     out, err = _run_nmcli(
-        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ", "device", "wifi", "list", "ifname", iface]
+        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ", "device", "wifi", "list",
+         "ifname", iface, "--rescan", "no"]
     )
     if err:
         return {"interface": iface, "connected": False, "error": f"Failed to read connection status: {err}"}

@@ -109,6 +109,24 @@ class TestWifiConnectionManager(unittest.TestCase):
 
     @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_status_does_not_trigger_a_scan(self, mock_run, mock_ifaces):
+        # Regression: /api/status must read from NetworkManager's cache (--rescan no),
+        # not trigger a live over-the-air scan. On multi-radio boxes an unscoped
+        # `device wifi list` per interface, polled every 10s, pile up into overlapping
+        # scans that starve out /api/scan and make the page look broken.
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+        mock_run.return_value = ("", None)
+
+        self.client.get('/api/status')
+
+        wifi_list_calls = [c.args[0] for c in mock_run.call_args_list if "wifi" in c.args[0]]
+        self.assertTrue(wifi_list_calls, "expected at least one 'device wifi list' call")
+        for args in wifi_list_calls:
+            self.assertIn("--rescan", args)
+            self.assertEqual(args[args.index("--rescan") + 1], "no")
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
     def test_api_status_multiple_interfaces(self, mock_run, mock_ifaces):
         # Two wifi radios: wlan0 associated, wlan1 idle. /api/status must report both,
         # each scoped to its own `device wifi list ifname <iface>` query.
