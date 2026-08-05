@@ -102,6 +102,131 @@ class TestWifiPorcupine(unittest.TestCase):
         args = wp_app_module.build_profile_add_args('wlan0', 'MyNet', '', randomize_mac=False)
         self.assertNotIn('802-11-wireless.cloned-mac-address', args)
 
+    # -- scan classification helpers --------------------------------------
+
+    def test_classify_security(self):
+        self.assertEqual(wp_app_module.classify_security(''), 'Open')
+        self.assertEqual(wp_app_module.classify_security('--'), 'Open')
+        self.assertEqual(wp_app_module.classify_security('WPA2'), 'WPA2')
+        self.assertEqual(wp_app_module.classify_security('WPA2 WPA3'), 'WPA2 WPA3')
+
+    def test_classify_band(self):
+        self.assertIsNone(wp_app_module.classify_band(None))
+        self.assertEqual(wp_app_module.classify_band(2437), '2.4GHz')
+        self.assertEqual(wp_app_module.classify_band(5220), '5GHz')
+        self.assertEqual(wp_app_module.classify_band(6135), '6GHz')
+
+    # -- /api/scan ---------------------------------------------------------
+
+    @patch('wifi_porcupine.app.get_wireless_interfaces')
+    @patch('wifi_porcupine.app._nmcli')
+    def test_api_scan_dedupes_and_sorts_by_signal(self, mock_nmcli, mock_ifaces):
+        mock_ifaces.return_value = ['wlan0']
+        mock_nmcli.return_value = (True, (
+            "*:HomeNetwork:60:WPA2:6:2437 MHz\n"
+            ":HomeNetwork:80:WPA2:6:2437 MHz\n"  # same SSID, stronger BSSID -> should win
+            ":GuestNet:40:--:44:5220 MHz\n"
+        ), "")
+        response = self.client.get('/api/scan')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['interface'], 'wlan0')
+        self.assertEqual(len(data['networks']), 2)
+        self.assertEqual(data['networks'][0]['ssid'], 'HomeNetwork')
+        self.assertEqual(data['networks'][0]['signal'], 80)
+        self.assertEqual(data['networks'][1]['ssid'], 'GuestNet')
+        self.assertEqual(data['networks'][1]['security'], 'Open')
+
+    @patch('wifi_porcupine.app.get_wireless_interfaces')
+    def test_api_scan_unknown_interface_is_rejected(self, mock_ifaces):
+        mock_ifaces.return_value = ['wlan0']
+        response = self.client.get('/api/scan?interface=wlan9')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('wlan9', response.get_json()['error'])
+
+    @patch('wifi_porcupine.app.get_wireless_interfaces')
+    def test_api_scan_no_interfaces_detected(self, mock_ifaces):
+        mock_ifaces.return_value = []
+        response = self.client.get('/api/scan')
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn('No wireless interface', data['error'])
+
+    @patch('wifi_porcupine.app.get_wireless_interfaces')
+    @patch('wifi_porcupine.app._nmcli')
+    def test_api_scan_uses_requested_interface(self, mock_nmcli, mock_ifaces):
+        mock_ifaces.return_value = ['wlan0', 'wlan1']
+        mock_nmcli.return_value = (True, "", "")
+        self.client.get('/api/scan?interface=wlan1')
+        args = mock_nmcli.call_args[0][0]
+        self.assertIn('wlan1', args)
+        self.assertIn('--rescan', args)
+        self.assertEqual(args[args.index('--rescan') + 1], 'yes')
+
+    # -- saved-password lookup ----------------------------------------------
+
+    @patch('wifi_porcupine.app._nmcli')
+    def test_find_saved_password_matches_by_ssid_property(self, mock_nmcli):
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "NAME,TYPE"]:
+                return True, "OtherProfile:802-11-wireless\nHomeNetwork:802-11-wireless\n", ""
+            if args[:2] == ["-t", "-f"] and "802-11-wireless.ssid" in args:
+                name = args[-1]
+                ssid = "SomethingElse" if name == "OtherProfile" else "HomeNetwork"
+                return True, f"802-11-wireless.ssid:{ssid}\n", ""
+            if "802-11-wireless-security.psk" in args:
+                return True, "hunter2\n", ""
+            return True, "", ""
+
+        mock_nmcli.side_effect = side_effect
+        self.assertEqual(wp_app_module.find_saved_password("HomeNetwork"), "hunter2")
+
+    @patch('wifi_porcupine.app._nmcli')
+    def test_find_saved_password_no_match_returns_none(self, mock_nmcli):
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "NAME,TYPE"]:
+                return True, "OtherProfile:802-11-wireless\n", ""
+            if "802-11-wireless.ssid" in args:
+                return True, "802-11-wireless.ssid:SomethingElse\n", ""
+            return True, "", ""
+
+        mock_nmcli.side_effect = side_effect
+        self.assertIsNone(wp_app_module.find_saved_password("HomeNetwork"))
+
+    @patch('wifi_porcupine.app._nmcli')
+    def test_find_saved_password_open_network_has_no_psk(self, mock_nmcli):
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "NAME,TYPE"]:
+                return True, "GuestNet:802-11-wireless\n", ""
+            if "802-11-wireless.ssid" in args:
+                return True, "802-11-wireless.ssid:GuestNet\n", ""
+            if "802-11-wireless-security.psk" in args:
+                return False, "", "Error: no such property"
+            return True, "", ""
+
+        mock_nmcli.side_effect = side_effect
+        self.assertIsNone(wp_app_module.find_saved_password("GuestNet"))
+
+    def test_api_saved_password_requires_ssid(self):
+        response = self.client.get('/api/saved-password')
+        self.assertEqual(response.status_code, 400)
+
+    @patch('wifi_porcupine.app.find_saved_password', return_value='hunter2')
+    def test_api_saved_password_found(self, mock_find):
+        response = self.client.get('/api/saved-password?ssid=HomeNetwork')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['found'])
+        self.assertEqual(data['password'], 'hunter2')
+
+    @patch('wifi_porcupine.app.find_saved_password', return_value=None)
+    def test_api_saved_password_not_found(self, mock_find):
+        response = self.client.get('/api/saved-password?ssid=UnknownNet')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertFalse(data['found'])
+        self.assertIsNone(data['password'])
+
     # -- mode detection --------------------------------------------------
 
     def test_detect_wifi_mode_non_linux(self):

@@ -314,6 +314,82 @@
             transform: scale(1.2);
         }
 
+        /* Scan-for-networks button + results list, next to the Target SSID field */
+        .btn-ghost {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border: 1px solid var(--glass-border);
+            padding: 0.75rem 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .btn-ghost:hover:not(:disabled) {
+            border-color: var(--color-blue);
+            color: var(--color-blue);
+        }
+
+        .net-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            max-height: 220px;
+            overflow-y: auto;
+            margin-top: 0.6rem;
+        }
+
+        .net-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            padding: 0.55rem 0.85rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.88rem;
+        }
+
+        .net-item:hover {
+            border-color: var(--color-blue);
+        }
+
+        .net-item .net-ssid {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: var(--font-heading);
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .net-item .net-ssid i {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .net-item .net-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+        .signal-bars i { width: 3px; border-radius: 1px; background: var(--text-muted); display: block; }
+        .signal-bars i:nth-child(1) { height: 30%; } .signal-bars i:nth-child(2) { height: 55%; }
+        .signal-bars i:nth-child(3) { height: 75%; } .signal-bars i:nth-child(4) { height: 100%; }
+        .signal-bars.strength-4 i { background: var(--color-green); }
+        .signal-bars.strength-3 i:nth-child(-n+3) { background: var(--color-green); }
+        .signal-bars.strength-2 i:nth-child(-n+2) { background: var(--color-orange); }
+        .signal-bars.strength-1 i:nth-child(1) { background: var(--color-pink); }
+
         .actions {
             display: flex;
             gap: 0.75rem;
@@ -471,7 +547,12 @@
                 </div>
                 <div>
                     <label class="first" for="ssid"><i class="fa-solid fa-tower-cell"></i> Target SSID</label>
-                    <input id="ssid" type="text" placeholder="The AP under test">
+                    <div class="row" style="gap: 0.5rem;">
+                        <input id="ssid" type="text" placeholder="The AP under test" style="flex: 1;">
+                        <button type="button" class="btn btn-ghost" id="btn-scan" onclick="scanNetworks()" title="Scan for nearby networks"><i class="fa-solid fa-magnifying-glass"></i></button>
+                    </div>
+                    <div class="hint" id="scan-hint">Scan to pick a nearby network instead of typing the SSID.</div>
+                    <div class="net-list" id="net-list" style="display: none;"></div>
 
                     <label for="password"><i class="fa-solid fa-key"></i> Password</label>
                     <input id="password" type="password" placeholder="Leave blank for an open network">
@@ -568,6 +649,100 @@
                 .filter((c) => c.checked)
                 .map((c) => c.value);
         }
+
+        // Scans use whichever interface is ticked (first one), falling back to the
+        // first detected interface if none are ticked yet -- the AP list looks the
+        // same regardless of which radio asks for it.
+        function firstAvailableInterface() {
+            const ticked = selectedInterfaces();
+            if (ticked.length) return ticked[0];
+            const cb = document.querySelector('.iface-cb');
+            return cb ? cb.value : '';
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function signalStrength(pct) {
+            if (pct >= 75) return 4;
+            if (pct >= 45) return 3;
+            if (pct >= 20) return 2;
+            return 1;
+        }
+
+        function signalBarsHtml(strength) {
+            return `<span class="signal-bars strength-${strength}"><i></i><i></i><i></i><i></i></span>`;
+        }
+
+        let scanning = false;
+
+        async function scanNetworks() {
+            if (scanning) return;
+            const iface = firstAvailableInterface();
+            const list = document.getElementById('net-list');
+            const hint = document.getElementById('scan-hint');
+            if (!iface) {
+                hint.textContent = 'No WiFi interface detected to scan with.';
+                return;
+            }
+            scanning = true;
+            document.getElementById('btn-scan').disabled = true;
+            hint.textContent = 'Scanning on ' + iface + '…';
+            list.style.display = 'flex';
+            list.innerHTML = '<div class="hint">Scanning…</div>';
+            try {
+                const res = await fetch('api/scan?interface=' + encodeURIComponent(iface), { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.success) {
+                    list.innerHTML = '';
+                    hint.textContent = data.error || 'Scan failed.';
+                    return;
+                }
+                if (!data.networks.length) {
+                    list.innerHTML = '<div class="hint">No networks found. Try rescanning.</div>';
+                } else {
+                    list.innerHTML = data.networks.map((net) => {
+                        const strength = signalStrength(net.signal);
+                        const lockIcon = net.security !== 'Open' ? 'fa-lock' : 'fa-lock-open';
+                        return `<div class="net-item" data-ssid="${escapeHtml(net.ssid)}">
+                            <span class="net-ssid"><i class="fa-solid ${lockIcon}"></i> ${escapeHtml(net.ssid)}</span>
+                            <span class="net-meta">${signalBarsHtml(strength)} ${escapeHtml(net.band || '?')} &middot; Ch ${net.channel != null ? net.channel : '?'} &middot; ${escapeHtml(net.security)}</span>
+                        </div>`;
+                    }).join('');
+                }
+                hint.textContent = `Found ${data.networks.length} network(s) on ${data.interface}. Click one to fill the SSID.`;
+            } catch (e) {
+                list.innerHTML = '';
+                hint.textContent = 'Network error while scanning.';
+            } finally {
+                scanning = false;
+                document.getElementById('btn-scan').disabled = false;
+            }
+        }
+
+        // Selecting a scanned network fills the SSID, then makes a best-effort attempt
+        // to auto-fill the password from a matching saved NetworkManager profile (e.g.
+        // one wifi_connection_manager already set up on this Pi). No match is silent,
+        // not an error -- the operator can still type a password by hand.
+        document.getElementById('net-list').addEventListener('click', async (e) => {
+            const item = e.target.closest('.net-item');
+            if (!item) return;
+            const ssid = item.getAttribute('data-ssid');
+            document.getElementById('ssid').value = ssid;
+            document.getElementById('net-list').style.display = 'none';
+            document.getElementById('scan-hint').textContent = 'Selected ' + ssid + '.';
+            try {
+                const res = await fetch('api/saved-password?ssid=' + encodeURIComponent(ssid), { cache: 'no-store' });
+                const data = await res.json();
+                if (data.success && data.found && data.password) {
+                    document.getElementById('password').value = data.password;
+                    document.getElementById('scan-hint').textContent = 'Selected ' + ssid + ' — password auto-filled from a saved network.';
+                }
+            } catch (e) { /* best-effort convenience only */ }
+        });
 
         async function pollStatus() {
             try {

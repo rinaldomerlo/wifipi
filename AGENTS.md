@@ -288,6 +288,16 @@ Project Root Structure:
   each in its own daemon thread. A random initial jitter (0..dwell_high) before each thread's first connect
   keeps interfaces desynchronized from cycle 1, rather than all connecting in lockstep because `start_run`
   launches them together. The slider bounds are templated from the Python constants so they can't drift.
+- **Target SSID convenience**: `GET /api/scan` scans one interface (`--rescan yes`; fine here since it's a
+  single one-off request, not something polled on a timer like `wifi_connection_manager`'s status endpoint)
+  and returns a deduped, signal-sorted network list purely so the SSID field can be filled by clicking
+  instead of typing blind. Picking a network then calls `GET /api/saved-password?ssid=` , which searches
+  saved NetworkManager wifi profiles for one whose `802-11-wireless.ssid` property matches (matched on the
+  SSID property, not the profile name) and reveals its PSK (`find_saved_password`) to auto-fill the password
+  field if this Pi already has that network configured (e.g. via `wifi_connection_manager`). Deliberately
+  not a hard dependency on `wifi_connection_manager` being installed — both endpoints degrade to "nothing
+  found" rather than erroring, and porcupine still creates its own disposable profile regardless of where
+  the password came from.
 - **Log**: a bounded `deque` + monotonic cursor (like `iperf_congestion_generator`), polled at
   `GET /api/output?since=`, so reloads/reattach and multiple tabs replay cleanly rather than stealing a
   destructive stream. The page reattaches to a run already in progress on load.

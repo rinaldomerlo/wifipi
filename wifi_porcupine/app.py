@@ -100,6 +100,12 @@ def _nmcli(args, timeout=NMCLI_TIMEOUT):
     return _run(["sudo", "nmcli"] + args, timeout=timeout)
 
 
+def _split_terse(line: str) -> list:
+    """Split a colon-delimited nmcli -t line, honoring backslash-escaped colons."""
+    fields = re.split(r"(?<!\\):", line)
+    return [f.replace("\\:", ":").replace("\\\\", "\\") for f in fields]
+
+
 # ---------------------------------------------------------------------------
 # Logging: a bounded ring buffer with a monotonic cursor, so a reloaded page or
 # a second tab can replay from wherever it left off instead of losing lines the
@@ -191,6 +197,23 @@ def friendly(raw) -> str:
     if "timeout" in low or "timed out" in low:
         return "association timed out"
     return raw.splitlines()[0][:200]
+
+
+def classify_security(security_field: str) -> str:
+    sec = (security_field or "").strip()
+    if not sec or sec == "--":
+        return "Open"
+    return sec.split()[0] if " " not in sec else sec
+
+
+def classify_band(freq_mhz):
+    if freq_mhz is None:
+        return None
+    if freq_mhz < 2500:
+        return "2.4GHz"
+    if freq_mhz < 5900:
+        return "5GHz"
+    return "6GHz"
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +411,48 @@ def _sweep_orphans():
 
 
 # ---------------------------------------------------------------------------
+# Scan + saved-password lookup: pure UI convenience so the SSID/password fields
+# can be filled from a live scan instead of typed blind. Deliberately not a
+# dependency on wifi_connection_manager -- this app stays fully self-contained
+# (it may be the only app installed on a given Pi) and still creates its own
+# disposable porcupine-<iface> profile regardless of where the password came from.
+# ---------------------------------------------------------------------------
+def find_saved_password(ssid: str):
+    """Look up a saved NetworkManager wifi profile whose SSID matches `ssid` and
+    reveal its stored PSK. Matches on the profile's actual 802-11-wireless.ssid
+    property, not its name, since NetworkManager doesn't guarantee those match.
+
+    Returns None if there's no matching saved profile, or if the match has no
+    stored PSK (open network, enterprise/802.1x, or unreadable) -- all treated
+    the same way by the caller: nothing to auto-fill, not an error.
+    """
+    ok, out, _ = _nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"])
+    if not ok or not out:
+        return None
+
+    for line in out.strip().splitlines():
+        parts = _split_terse(line)
+        if len(parts) < 2 or parts[1] != "802-11-wireless":
+            continue
+        name = parts[0]
+
+        ok2, ssid_out, _ = _nmcli(["-t", "-f", "802-11-wireless.ssid", "connection", "show", name])
+        if not ok2 or not ssid_out:
+            continue
+        ssid_line = _split_terse(ssid_out.strip().splitlines()[0])
+        if len(ssid_line) < 2 or ssid_line[1] != ssid:
+            continue
+
+        ok3, psk_out, _ = _nmcli(["-s", "-g", "802-11-wireless-security.psk", "connection", "show", name])
+        if not ok3:
+            return None  # matched profile has no PSK property (open/enterprise) or read failed
+        lines = (psk_out or "").strip().splitlines()
+        return _split_terse(lines[0])[0] if lines else None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
@@ -414,6 +479,73 @@ def api_interfaces():
         "wifi_supported": wifi_mode is not None,
         "wifi_reason": wifi_reason,
     })
+
+
+@app.route("/api/scan")
+def api_scan():
+    """Scan for nearby WiFi networks on a chosen (or the first detected) interface,
+    purely so the Target SSID field can be filled from a live list. `--rescan yes`
+    is fine here (unlike wifi_connection_manager's status polling) because this is
+    a single one-off request against one interface, not something polled on a timer.
+    """
+    interfaces = get_wireless_interfaces()
+    requested_iface = request.args.get("interface")
+    if requested_iface:
+        if requested_iface not in interfaces:
+            return jsonify({"success": False, "error": f"Unknown interface: {requested_iface}."}), 400
+        iface = requested_iface
+    else:
+        iface = interfaces[0] if interfaces else ""
+    if not iface:
+        return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
+
+    ok, out, err = _nmcli(
+        ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ", "device", "wifi", "list",
+         "ifname", iface, "--rescan", "yes"],
+        timeout=NMCLI_TIMEOUT,
+    )
+    if not ok:
+        return jsonify({"success": False, "error": f"Scan failed: {friendly(err)}"}), 200
+
+    networks = {}
+    for line in (out or "").strip().splitlines():
+        parts = _split_terse(line)
+        if len(parts) < 6:
+            continue
+        in_use, ssid, signal, security, chan, freq = parts[:6]
+        if not ssid:
+            continue
+        freq_mhz = int(freq.split()[0]) if freq.split() and freq.split()[0].isdigit() else None
+        net = {
+            "ssid": ssid,
+            "connected": in_use.strip() == "*",
+            "signal": int(signal) if signal.isdigit() else 0,
+            "security": classify_security(security),
+            "channel": int(chan) if chan.isdigit() else None,
+            "band": classify_band(freq_mhz),
+        }
+        # De-duplicate SSIDs seen on multiple BSSIDs (mesh/repeater setups); keep the strongest.
+        existing = networks.get(ssid)
+        if not existing or net["signal"] > existing["signal"]:
+            networks[ssid] = net
+
+    deduped = sorted(networks.values(), key=lambda n: n["signal"], reverse=True)
+    return jsonify({"success": True, "interface": iface, "networks": deduped})
+
+
+@app.route("/api/saved-password")
+def api_saved_password():
+    """Look up a saved NetworkManager profile's PSK for `ssid`, so the password
+    field can be auto-filled when this Pi already has that network configured
+    (e.g. via wifi_connection_manager). `found=False` covers both "no matching
+    saved profile" and "matched, but nothing stored" -- neither is an error, it's
+    just nothing to fill in, and the operator can still type a password by hand.
+    """
+    ssid = (request.args.get("ssid") or "").strip()
+    if not ssid:
+        return jsonify({"success": False, "error": "ssid is required."}), 400
+    password = find_saved_password(ssid)
+    return jsonify({"success": True, "found": password is not None, "password": password})
 
 
 @app.route("/api/status")
