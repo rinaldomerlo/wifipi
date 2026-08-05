@@ -275,17 +275,19 @@ Project Root Structure:
 ### J. WiFi Porcupine (`wifi_porcupine`)
 - **Purpose**: Stress an AP's *association* side — the tables the other generators never touch. It enlists
   several physical WiFi interfaces (the built-in radio plus USB adapters) and rapidly, randomly associates
-  and disassociates each against one target SSID, randomizing the interface's MAC on every reconnect so the
-  hub sees a constant stream of brand-new stations bloating its association / DHCP-lease / ARP tables. Each
-  interface is a "spine" repeatedly poking the AP.
-- **Association/MAC churn**: one NetworkManager profile per interface (`porcupine-<iface>`) created with
-  `802-11-wireless.cloned-mac-address random`, so every `nmcli connection up` picks a fresh random MAC.
-  A per-interface daemon thread loops connect → dwell → disconnect → gap; the new MAC is read back from
-  `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
+  and disassociates each against one target SSID, optionally randomizing the interface's MAC on every
+  reconnect so the hub sees a constant stream of brand-new stations bloating its association / DHCP-lease /
+  ARP tables. Each interface is a "spine" repeatedly poking the AP.
+- **Association/MAC churn**: one NetworkManager profile per interface (`porcupine-<iface>`). A `randomize_mac`
+  toggle in the UI (default on) controls whether the profile is created with
+  `802-11-wireless.cloned-mac-address random` (`build_profile_add_args`) — off, the interface churns under
+  its own real MAC. A per-interface daemon thread loops connect → dwell → disconnect → gap; the (possibly
+  cloned) MAC is read back from `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
 - **Intensity**: a single slider (1–10) controls speed only — interpolated dwell time high→short via
   `compute_dwell_range`. Concurrency is not derived from it: every ticked interface churns simultaneously,
-  each in its own daemon thread. The slider bounds are templated from the Python constants so they can't
-  drift.
+  each in its own daemon thread. A random initial jitter (0..dwell_high) before each thread's first connect
+  keeps interfaces desynchronized from cycle 1, rather than all connecting in lockstep because `start_run`
+  launches them together. The slider bounds are templated from the Python constants so they can't drift.
 - **Log**: a bounded `deque` + monotonic cursor (like `iperf_congestion_generator`), polled at
   `GET /api/output?since=`, so reloads/reattach and multiple tabs replay cleanly rather than stealing a
   destructive stream. The page reattaches to a run already in progress on load.

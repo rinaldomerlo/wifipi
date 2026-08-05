@@ -297,6 +297,23 @@
             color: var(--color-blue);
         }
 
+        /* Standalone option checkbox (e.g. randomize-MAC) */
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 1.2rem;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .check-row input[type="checkbox"] {
+            width: auto;
+            accent-color: var(--color-blue);
+            transform: scale(1.2);
+        }
+
         .actions {
             display: flex;
             gap: 0.75rem;
@@ -440,14 +457,14 @@
                     <div class="iface-list" id="iface-list">
                         <div class="hint">Detecting interfaces…</div>
                     </div>
-                    <div class="hint">Each selected interface associates, holds briefly, then disconnects and reconnects with a fresh random MAC — a new station to the AP every cycle.</div>
+                    <div class="hint">Each selected interface associates, holds briefly, then disconnects and reconnects — a new station to the AP every cycle. Interfaces churn independently and at random, never in lockstep.</div>
 
                     <label for="intensity"><i class="fa-solid fa-gauge-high"></i> Intensity</label>
                     <div class="row" style="gap: 1rem;">
                         <input id="intensity" type="range" min="{{ intensity_min }}" max="{{ intensity_max }}" value="{{ intensity_default }}" oninput="updateIntensityLabel()">
                         <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 2.5em; text-align: right;">{{ intensity_default }}</span>
                     </div>
-                    <div class="hint">Controls churn speed only — shorter dwell time between reconnects. Every ticked interface above churns simultaneously.</div>
+                    <div class="hint">Controls churn speed — shorter dwell time between reconnects. Every ticked interface above churns simultaneously.</div>
 
                     <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
                     <input id="duration" type="number" value="60" min="1">
@@ -458,6 +475,12 @@
 
                     <label for="password"><i class="fa-solid fa-key"></i> Password</label>
                     <input id="password" type="password" placeholder="Leave blank for an open network">
+
+                    <label class="check-row" for="randomize-mac">
+                        <input type="checkbox" id="randomize-mac" checked>
+                        <span><i class="fa-solid fa-shuffle"></i> Randomize MAC on churn</span>
+                    </label>
+                    <div class="hint">Each reconnect picks a fresh random MAC, so the AP sees a brand-new station every cycle. Untick to churn under the interface's own MAC instead.</div>
                 </div>
             </div>
 
@@ -603,6 +626,7 @@
                 password: document.getElementById('password').value,
                 intensity: parseInt(document.getElementById('intensity').value) || {{ intensity_default }},
                 duration_minutes: parseInt(document.getElementById('duration').value) || 60,
+                randomize_mac: document.getElementById('randomize-mac').checked,
             };
 
             document.getElementById('output').textContent = '';

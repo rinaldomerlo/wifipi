@@ -2,22 +2,24 @@
 """
 Flask app that stresses a WiFi access point by rapidly and randomly
 associating / disassociating several *physical* WiFi interfaces (the Pi's
-built-in radio plus any USB adapters) against one target SSID, and randomizing
-each interface's MAC on every reconnect so the AP sees a constant stream of
-brand-new stations. That bloats the AP's association / DHCP-lease / ARP tables
-far more than plain reconnect churn -- each interface is a "spine" repeatedly
-poking the hub, hence "porcupine".
+built-in radio plus any USB adapters) against one target SSID, optionally
+randomizing each interface's MAC on every reconnect so the AP sees a constant
+stream of brand-new stations. That bloats the AP's association / DHCP-lease /
+ARP tables far more than plain reconnect churn -- each interface is a
+"spine" repeatedly poking the hub, hence "porcupine".
 
-Every ticked interface churns at once -- concurrency is just however many you
-select. A single intensity slider controls only speed: how long each
-interface dwells associated before disconnecting and reconnecting with a
-fresh MAC.
+Every ticked interface churns at once, independently and out of sync with the
+others (a random initial jitter plus per-cycle random dwell/gap keep them from
+ever lining up) -- concurrency is just however many you select. A single
+intensity slider controls speed: how long each interface dwells associated
+before disconnecting and reconnecting.
 
 Association/MAC churn goes through NetworkManager (`nmcli`, one connection
-profile per interface with `802-11-wireless.cloned-mac-address random`).
-This requires Linux + privileged tooling, so the systemd unit runs this app
-as root (see deploy/wifi-porcupine.service). Off-Linux -- e.g. macOS during
-development -- every route degrades to a clear JSON error instead of
+profile per interface; MAC randomization sets
+`802-11-wireless.cloned-mac-address random` on that profile, toggle-able per
+run). This requires Linux + privileged tooling, so the systemd unit runs this
+app as root (see deploy/wifi-porcupine.service). Off-Linux -- e.g. macOS
+during development -- every route degrades to a clear JSON error instead of
 crashing. See CLAUDE.md's Environment Split section.
 """
 
@@ -214,29 +216,32 @@ def profile_name(iface) -> str:
     return f"{PROFILE_PREFIX}-{iface}"
 
 
-def build_profile_add_args(iface, ssid, password):
+def build_profile_add_args(iface, ssid, password, randomize_mac=True):
     """Args for `nmcli connection add` creating this interface's porcupine profile.
 
     `802-11-wireless.cloned-mac-address random` makes NetworkManager pick a fresh
     random MAC on every activation, so each reconnect looks like a new station.
+    Omitted when `randomize_mac` is False, so the interface churns under its own
+    real (or globally-configured) MAC instead.
     """
     args = [
         "connection", "add", "type", "wifi",
         "con-name", profile_name(iface),
         "ifname", iface,
         "ssid", ssid,
-        "802-11-wireless.cloned-mac-address", "random",
         "connection.autoconnect", "no",
     ]
+    if randomize_mac:
+        args += ["802-11-wireless.cloned-mac-address", "random"]
     if password:
         args += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password]
     return args
 
 
-def create_profile(iface, ssid, password):
+def create_profile(iface, ssid, password, randomize_mac=True):
     """Recreate this interface's connection profile from scratch. Returns (ok, message)."""
     _nmcli(["connection", "delete", profile_name(iface)])  # clear any stale profile; ignore errors
-    ok, out, err = _nmcli(build_profile_add_args(iface, ssid, password))
+    ok, out, err = _nmcli(build_profile_add_args(iface, ssid, password, randomize_mac))
     return ok, (err or out)
 
 
@@ -265,8 +270,15 @@ def read_iface_mac(iface):
 # Churn engine
 # ---------------------------------------------------------------------------
 def churn_worker(iface, config):
-    """One interface's association/MAC churn loop: connect (new MAC) -> dwell -> disconnect -> gap."""
+    """One interface's association/MAC churn loop: connect (new MAC) -> dwell -> disconnect -> gap.
+
+    Interfaces are started together in start_run(), so without a stagger they'd all connect in
+    lockstep on cycle 1; the random per-cycle dwell/gap would only desync them afterwards. The
+    initial jitter spreads first connects across a full dwell window so churn looks random from
+    the start rather than synchronized.
+    """
     dwell_low, dwell_high = compute_dwell_range(config["intensity"])
+    _interruptible_sleep(random.uniform(0, dwell_high))
     while not stop_event.is_set():
         ok, _, err = bring_up(iface)
         if stop_event.is_set():
@@ -320,10 +332,11 @@ def start_run(config):
     _log(
         f"Starting porcupine run: {len(config['interfaces'])} interface(s) -> "
         f"SSID '{config['ssid']}', intensity {config['intensity']}"
+        + (", random MAC per reconnect" if config["randomize_mac"] else ", MAC unchanged")
     )
 
     for iface in config["interfaces"]:
-        ok, msg = create_profile(iface, config["ssid"], config["password"])
+        ok, msg = create_profile(iface, config["ssid"], config["password"], config["randomize_mac"])
         if not ok:
             _log(f"[{iface}] profile create failed: {friendly(msg)}")
 
@@ -470,12 +483,15 @@ def api_start():
     if duration < 1:
         return jsonify({"error": "Duration must be at least 1 minute."}), 400
 
+    randomize_mac = bool(data.get("randomize_mac", True))
+
     config = {
         "interfaces": clean,
         "ssid": ssid,
         "password": password,
         "intensity": intensity,
         "duration_minutes": duration,
+        "randomize_mac": randomize_mac,
     }
 
     with run_lock:

@@ -98,6 +98,10 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertNotIn('wifi-sec.psk', args)
         self.assertNotIn('wifi-sec.key-mgmt', args)
 
+    def test_build_profile_add_args_mac_randomization_off(self):
+        args = wp_app_module.build_profile_add_args('wlan0', 'MyNet', '', randomize_mac=False)
+        self.assertNotIn('802-11-wireless.cloned-mac-address', args)
+
     # -- mode detection --------------------------------------------------
 
     def test_detect_wifi_mode_non_linux(self):
@@ -166,7 +170,19 @@ class TestWifiPorcupine(unittest.TestCase):
         config = kwargs['args'][0]
         self.assertEqual(config['interfaces'], ['wlan0', 'wlan1'])
         self.assertEqual(config['intensity'], 7)
+        self.assertTrue(config['randomize_mac'])
         self.assertTrue(wp_app_module.run_state['running'])
+
+    @patch('wifi_porcupine.app.threading.Thread')
+    def test_start_route_randomize_mac_can_be_disabled(self, mock_thread):
+        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
+             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']):
+            response = self.client.post('/api/start', json={
+                "interfaces": ["wlan0"], "ssid": "MyNet", "randomize_mac": False,
+            })
+        self.assertEqual(response.status_code, 200)
+        config = mock_thread.call_args[1]['args'][0]
+        self.assertFalse(config['randomize_mac'])
 
     def test_stop_route_when_not_running(self):
         response = self.client.post('/api/stop')
