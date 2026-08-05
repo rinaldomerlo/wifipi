@@ -8,9 +8,10 @@ brand-new stations. That bloats the AP's association / DHCP-lease / ARP tables
 far more than plain reconnect churn -- each interface is a "spine" repeatedly
 poking the hub, hence "porcupine".
 
-A single intensity slider scales both how fast interfaces cycle (dwell time)
-and how many cycle at once (concurrency): a supervisor thread reshuffles which
-enlisted interfaces are in the active churning subset each round.
+Every ticked interface churns at once -- concurrency is just however many you
+select. A single intensity slider controls only speed: how long each
+interface dwells associated before disconnecting and reconnecting with a
+fresh MAC.
 
 Association/MAC churn goes through NetworkManager (`nmcli`, one connection
 profile per interface with `802-11-wireless.cloned-mac-address random`).
@@ -20,7 +21,6 @@ development -- every route degrades to a clear JSON error instead of
 crashing. See CLAUDE.md's Environment Split section.
 """
 
-import math
 import os
 import platform
 import random
@@ -46,7 +46,6 @@ DEFAULT_INTENSITY = 5
 DWELL_AT_MIN_INTENSITY = (25.0, 45.0)  # (low, high) seconds an interface stays associated at intensity 1
 DWELL_AT_MAX_INTENSITY = (2.0, 5.0)    # ... at intensity 10 (fast association storm)
 GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
-RESHUFFLE_INTERVAL_SECONDS = 20        # how often the active churning subset is re-picked
 
 NMCLI_TIMEOUT = 15
 CONNECT_TIMEOUT = 30
@@ -64,9 +63,7 @@ run_state = {
     "config": None,
 }
 stats = {"reconnects": 0, "errors": 0, "active_interfaces": 0}
-active_ifaces = set()      # the churning subset chosen by the supervisor
 workers = []                # per-interface churn threads
-supervisor_thread = None
 duration_thread = None
 stop_event = threading.Event()
 
@@ -210,14 +207,6 @@ def compute_dwell_range(intensity):
     return (low, high)
 
 
-def compute_concurrency(n_interfaces, intensity) -> int:
-    """How many enlisted interfaces churn simultaneously at a given intensity (>=1 when any)."""
-    if n_interfaces <= 0:
-        return 0
-    _, hi = INTENSITY_RANGE
-    return max(1, math.ceil(n_interfaces * intensity / hi))
-
-
 # ---------------------------------------------------------------------------
 # nmcli profiles (one per interface, each with a random cloned MAC)
 # ---------------------------------------------------------------------------
@@ -279,12 +268,6 @@ def churn_worker(iface, config):
     """One interface's association/MAC churn loop: connect (new MAC) -> dwell -> disconnect -> gap."""
     dwell_low, dwell_high = compute_dwell_range(config["intensity"])
     while not stop_event.is_set():
-        with run_lock:
-            is_active = iface in active_ifaces
-        if not is_active:
-            _interruptible_sleep(1.0)
-            continue
-
         ok, _, err = bring_up(iface)
         if stop_event.is_set():
             break
@@ -318,20 +301,6 @@ def churn_worker(iface, config):
         stats["active_interfaces"] = len(run_state["connected"])
 
 
-def supervisor(config):
-    """Periodically re-pick which enlisted interfaces are in the active churning subset."""
-    enlisted = config["interfaces"]
-    while not stop_event.is_set():
-        conc = compute_concurrency(len(enlisted), config["intensity"])
-        chosen = set(random.sample(enlisted, min(conc, len(enlisted))))
-        with run_lock:
-            active_ifaces.clear()
-            active_ifaces.update(chosen)
-        _log(f"churn subset -> {', '.join(sorted(chosen))} ({conc}/{len(enlisted)} interface(s))")
-        if stop_event.wait(RESHUFFLE_INTERVAL_SECONDS):
-            break
-
-
 def duration_timer(minutes):
     """Stop the run once its duration elapses (unless already stopped)."""
     if stop_event.wait(minutes * 60):
@@ -346,7 +315,7 @@ def start_run(config):
     run_state['running'] has already been set True by the start route, so /status
     reports 'running' immediately even while this setup is still in progress.
     """
-    global supervisor_thread, duration_thread
+    global duration_thread
 
     _log(
         f"Starting porcupine run: {len(config['interfaces'])} interface(s) -> "
@@ -364,8 +333,6 @@ def start_run(config):
         workers.append(t)
         t.start()
 
-    supervisor_thread = threading.Thread(target=supervisor, args=(config,), daemon=True)
-    supervisor_thread.start()
     duration_thread = threading.Thread(target=duration_timer, args=(config["duration_minutes"],), daemon=True)
     duration_thread.start()
 
@@ -381,8 +348,6 @@ def stop_run():
 
     for t in workers:
         t.join(timeout=5)
-    if supervisor_thread:
-        supervisor_thread.join(timeout=3)
 
     for iface in enlisted:
         bring_down(iface)
@@ -391,7 +356,6 @@ def stop_run():
     with run_lock:
         run_state["connected"] = set()
         run_state["wifi_mode"] = None
-        active_ifaces.clear()
         stats["active_interfaces"] = 0
     _log("Run stopped; interfaces disconnected and profiles removed.")
     stop_event.clear()
@@ -523,7 +487,6 @@ def api_start():
         run_state["connected"] = set()
         run_state["config"] = config
         stats.update({"reconnects": 0, "errors": 0, "active_interfaces": 0})
-        active_ifaces.clear()
     # Reset the log ring buffer so a new run's Live Activity starts clean rather
     # than replaying the previous run's lines (the client polls api/output?since=0).
     with log_lock:

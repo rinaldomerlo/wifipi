@@ -447,7 +447,7 @@
                         <input id="intensity" type="range" min="{{ intensity_min }}" max="{{ intensity_max }}" value="{{ intensity_default }}" oninput="updateIntensityLabel()">
                         <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 2.5em; text-align: right;">{{ intensity_default }}</span>
                     </div>
-                    <div class="hint">Scales both churn speed (shorter dwell between reconnects) and concurrency (how many interfaces churn at once).</div>
+                    <div class="hint">Controls churn speed only — shorter dwell time between reconnects. Every ticked interface above churns simultaneously.</div>
 
                     <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
                     <input id="duration" type="number" value="60" min="1">

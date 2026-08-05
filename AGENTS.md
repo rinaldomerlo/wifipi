@@ -282,10 +282,10 @@ Project Root Structure:
   `802-11-wireless.cloned-mac-address random`, so every `nmcli connection up` picks a fresh random MAC.
   A per-interface daemon thread loops connect → dwell → disconnect → gap; the new MAC is read back from
   `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
-- **Intensity**: a single slider (1–10) scales *both* dwell time (interpolated high→short:
-  `compute_dwell_range`) and concurrency (`compute_concurrency` — how many enlisted interfaces churn at
-  once). A supervisor thread reshuffles the active random subset every `RESHUFFLE_INTERVAL_SECONDS`. The
-  slider bounds are templated from the Python constants so they can't drift.
+- **Intensity**: a single slider (1–10) controls speed only — interpolated dwell time high→short via
+  `compute_dwell_range`. Concurrency is not derived from it: every ticked interface churns simultaneously,
+  each in its own daemon thread. The slider bounds are templated from the Python constants so they can't
+  drift.
 - **Log**: a bounded `deque` + monotonic cursor (like `iperf_congestion_generator`), polled at
   `GET /api/output?since=`, so reloads/reattach and multiple tabs replay cleanly rather than stealing a
   destructive stream. The page reattaches to a run already in progress on load.

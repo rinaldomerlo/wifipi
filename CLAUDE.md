@@ -110,8 +110,9 @@ events instead of streaming them; `stdbuf` isn't usable here because `sudo` rese
 `802-11-wireless.cloned-mac-address random`) plus `iw` for interface listing. Its systemd unit runs as
 **root** by default, so it needs no new sudoers entry and the "four apps need passwordless sudo" count
 above is unchanged — commands still shell out via `sudo <cmd>`, a harmless no-op under root. A single
-intensity slider scales both churn speed (dwell time) and concurrency (how many enlisted interfaces churn
-at once). It requires NetworkManager as the active backend, same caveat as `wifi_connection_manager`, and
+intensity slider controls churn speed (dwell time) only; concurrency is just however many interfaces are
+ticked — every one of them churns simultaneously. It requires NetworkManager as the active backend, same
+caveat as `wifi_connection_manager`, and
 refuses up front off-Linux / without `nmcli`+`iw` so macOS dev gets a clear JSON error. It also runs a
 best-effort orphan sweep on startup (leftover `porcupine-*` NetworkManager profiles) so a hard restart is
 idempotent.

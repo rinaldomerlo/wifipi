@@ -28,7 +28,6 @@ class TestWifiPorcupine(unittest.TestCase):
         wp_app_module.stats.update({
             "reconnects": 0, "errors": 0, "active_interfaces": 0,
         })
-        wp_app_module.active_ifaces.clear()
         wp_app_module.stop_event.clear()
 
     # -- basic routes --------------------------------------------------
@@ -79,12 +78,6 @@ class TestWifiPorcupine(unittest.TestCase):
         low2, high2 = wp_app_module.compute_dwell_range(8)
         self.assertLess(low2, low1)
         self.assertLess(high2, high1)
-
-    def test_compute_concurrency(self):
-        self.assertEqual(wp_app_module.compute_concurrency(4, 10), 4)
-        self.assertEqual(wp_app_module.compute_concurrency(4, 1), 1)
-        self.assertEqual(wp_app_module.compute_concurrency(4, 5), 2)
-        self.assertEqual(wp_app_module.compute_concurrency(0, 10), 0)
 
     # -- naming / profile args -------------------------------------------
 
