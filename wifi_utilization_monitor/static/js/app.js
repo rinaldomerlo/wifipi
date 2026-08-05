@@ -411,7 +411,11 @@ function setupCanvasHover(canvasId, bandName, tooltipId) {
 
 // Resolve channel grid boundaries and details for rendering
 const chartLayout = {
-    paddingLeft: 40,
+    // 56px gives the right-aligned y-axis labels (up to "-100 dBm", measured at
+    // ~43.3px wide in 10px Outfit) enough room before their anchor point -- any
+    // less and their leading characters render at a negative canvas x and are
+    // silently clipped by the canvas's own edge (not a CSS overflow issue).
+    paddingLeft: 56,
     paddingRight: 30,
     paddingTop: 30,
     paddingBottom: 40
