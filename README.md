@@ -102,10 +102,14 @@ Systemd service files are provided in the `deploy/` directory. Copy them to `/et
 The Web Terminal is the only app with a dependency outside the Python virtualenv. **`ttyd` is not packaged in Debian Bookworm or Trixie** (only in `sid`), so `apt install ttyd` will fail on Raspberry Pi OS. Install upstream's static release binary instead:
 
 ```bash
-wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.aarch64
-sudo install -m 755 ttyd.aarch64 /usr/local/bin/ttyd
+wget -O $HOME/Downloads/ttyd.aarch64 https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.aarch64
+sudo install -m 755 $HOME/Downloads/ttyd.aarch64 /usr/local/bin/ttyd
 ttyd --version
 ```
+
+The binary only needs to reach `/usr/local/bin` — download it outside the repo (`$HOME/Downloads`, which
+Raspberry Pi OS always has) rather than into `/opt/wifipi`, so it doesn't linger as an untracked file in
+the working tree.
 
 Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the current version and to verify the checksum.
 
