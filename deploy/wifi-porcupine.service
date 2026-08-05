@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 # Uncomment and set User/Group if you wish to run as a specific non-root user (e.g., User=jenkins or User=pi).
-# If omitted, systemd runs the service as root -- required here for nmcli / ip / iptables / sysctl.
+# If omitted, systemd runs the service as root, so its `sudo nmcli` calls are a no-op under root.
 # User=pi
 # Group=pi
 WorkingDirectory=/opt/wifipi/wifi_porcupine

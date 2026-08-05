@@ -297,66 +297,6 @@
             color: var(--color-blue);
         }
 
-        /* netns toggle switch */
-        .toggle-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-top: 1.2rem;
-        }
-
-        .toggle-switch {
-            position: relative;
-            width: 48px;
-            height: 26px;
-            flex-shrink: 0;
-        }
-
-        .toggle-switch input { display: none; }
-
-        .toggle-knob {
-            position: absolute;
-            inset: 0;
-            border-radius: 50px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid var(--glass-border);
-            transition: all 0.25s ease;
-            cursor: pointer;
-        }
-
-        .toggle-knob::before {
-            content: "";
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            left: 3px;
-            top: 3px;
-            border-radius: 50%;
-            background: var(--text-secondary);
-            transition: all 0.25s ease;
-        }
-
-        .toggle-switch input:checked + .toggle-knob {
-            background: rgba(0, 210, 255, 0.3);
-            border-color: var(--color-blue);
-        }
-
-        .toggle-switch input:checked + .toggle-knob::before {
-            transform: translateX(22px);
-            background: var(--color-blue);
-        }
-
-        .toggle-switch input:disabled + .toggle-knob {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        #netns-extra.disabled {
-            opacity: 0.4;
-            pointer-events: none;
-        }
-
         .actions {
             display: flex;
             gap: 0.75rem;
@@ -463,19 +403,6 @@
             color: var(--color-green);
         }
 
-        .caveat {
-            font-size: 0.8rem;
-            color: var(--color-orange);
-            background: rgba(255, 145, 0, 0.08);
-            border: 1px solid rgba(255, 145, 0, 0.25);
-            border-radius: 10px;
-            padding: 0.7rem 0.9rem;
-            margin-top: 1rem;
-            line-height: 1.45;
-        }
-
-        .caveat i { margin-right: 5px; }
-
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: rgba(8, 9, 15, 0.5); }
@@ -531,32 +458,7 @@
 
                     <label for="password"><i class="fa-solid fa-key"></i> Password</label>
                     <input id="password" type="password" placeholder="Leave blank for an open network">
-
-                    <div class="toggle-row">
-                        <label style="margin: 0;"><i class="fa-solid fa-users-line"></i> netns Traffic Multiplier</label>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="netns-enabled" onchange="updateNetns()">
-                            <span class="toggle-knob"></span>
-                        </label>
-                    </div>
-                    <div class="hint" id="netns-hint">Optional: run extra namespace clients behind each interface to add real traffic load.</div>
-
-                    <div id="netns-extra" class="disabled">
-                        <label for="netns-per"><i class="fa-solid fa-user-group"></i> Clients per interface</label>
-                        <input id="netns-per" type="number" value="{{ netns_default }}" min="{{ netns_min }}" max="{{ netns_max }}">
-
-                        <label for="target-url"><i class="fa-solid fa-globe"></i> Target URL (HTTP)</label>
-                        <input id="target-url" type="text" placeholder="http://192.168.1.1/">
-                    </div>
                 </div>
-            </div>
-
-            <div class="caveat">
-                <i class="fa-solid fa-circle-info"></i>
-                Only the physical-interface association/MAC churn stresses the AP's association tables.
-                netns clients NAT out through their interface's single radio MAC, so they add traffic load
-                but are invisible to the AP as separate associations — over WiFi you can't put multiple MACs
-                onto one station link.
             </div>
 
             <div class="actions">
@@ -579,14 +481,6 @@
                 <div class="stat-tile">
                     <div class="stat-label">Reconnects</div>
                     <div class="stat-value" id="stat-reconnects">0</div>
-                </div>
-                <div class="stat-tile">
-                    <div class="stat-label">netns Clients</div>
-                    <div class="stat-value" id="stat-clients">0</div>
-                </div>
-                <div class="stat-tile">
-                    <div class="stat-label">Requests</div>
-                    <div class="stat-value" id="stat-requests">0</div>
                 </div>
                 <div class="stat-tile">
                     <div class="stat-label">Errors</div>
@@ -620,30 +514,11 @@
             document.getElementById('intensity-value').textContent = document.getElementById('intensity').value;
         }
 
-        let netnsSupported = false;
-        let netnsReason = '';
-
-        function updateNetns() {
-            const cb = document.getElementById('netns-enabled');
-            document.getElementById('netns-extra').classList.toggle('disabled', !cb.checked);
-        }
-
         async function loadInterfaces() {
             const list = document.getElementById('iface-list');
             try {
                 const res = await fetch('api/interfaces', { cache: 'no-store' });
                 const data = await res.json();
-                netnsSupported = !!data.netns_supported;
-                netnsReason = data.netns_reason || '';
-
-                const cb = document.getElementById('netns-enabled');
-                if (!netnsSupported) {
-                    cb.checked = false;
-                    cb.disabled = true;
-                    updateNetns();
-                    document.getElementById('netns-hint').textContent =
-                        'Unavailable here: ' + (netnsReason || 'namespaces not supported') + '.';
-                }
 
                 if (!data.interfaces || data.interfaces.length === 0) {
                     const reason = data.wifi_supported ? 'No WiFi interfaces detected.'
@@ -675,12 +550,9 @@
             try {
                 const res = await fetch('api/status', { cache: 'no-store' });
                 const data = await res.json();
-                document.getElementById('stat-mode').textContent =
-                    data.running ? (data.netns_mode === 'netns' ? 'LIVE + NETNS' : 'LIVE') : '—';
+                document.getElementById('stat-mode').textContent = data.running ? 'LIVE' : '—';
                 document.getElementById('stat-active').textContent = data.active_interfaces ?? 0;
                 document.getElementById('stat-reconnects').textContent = data.reconnects ?? 0;
-                document.getElementById('stat-clients').textContent = data.netns_clients ?? 0;
-                document.getElementById('stat-requests').textContent = data.requests ?? 0;
                 document.getElementById('stat-errors').textContent = data.errors ?? 0;
                 if (!data.running && statusTimer) {
                     clearInterval(statusTimer);
@@ -731,9 +603,6 @@
                 password: document.getElementById('password').value,
                 intensity: parseInt(document.getElementById('intensity').value) || {{ intensity_default }},
                 duration_minutes: parseInt(document.getElementById('duration').value) || 60,
-                netns_enabled: document.getElementById('netns-enabled').checked,
-                netns_per_iface: parseInt(document.getElementById('netns-per').value) || {{ netns_default }},
-                target_url: document.getElementById('target-url').value.trim(),
             };
 
             document.getElementById('output').textContent = '';

@@ -20,7 +20,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `network_device_scanner/` | Flask app — ARP-based LAN device inventory (IP/MAC/vendor) via `nmap -sn` on a chosen Bind Interface. Port 5006, proxied at `/devices/`. |
 | `roaming_monitor/` | Flask app — live association-event timeline from `iw event`, with roam timing and decoded 802.11 reason codes. Port 5007, proxied at `/roaming/`. |
 | `web_terminal/` | Flask app — thin wrapper framing a `ttyd` browser shell. Port 5008, proxied at `/terminal/`; `ttyd` itself listens on loopback:5009. |
-| `wifi_porcupine/` | Flask app — stresses an AP by churning association/MAC across several physical WiFi interfaces (random MAC per reconnect via `nmcli`), with an optional per-interface `netns` traffic multiplier. Port 5010, proxied at `/porcupine/`. |
+| `wifi_porcupine/` | Flask app — stresses an AP by churning association/MAC across several physical WiFi interfaces (random MAC per reconnect via `nmcli`), intensity controlled by a single slider. Port 5010, proxied at `/porcupine/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -107,16 +107,14 @@ events instead of streaming them; `stdbuf` isn't usable here because `sudo` rese
 
 `wifi_porcupine` churns association state across several physical WiFi interfaces at once. It needs
 `nmcli` (for the MAC-randomizing connect/disconnect — one profile per interface with
-`802-11-wireless.cloned-mac-address random`) plus `ip`/`iptables`/`sysctl` (for the optional per-interface
-`netns` traffic fleets). Like `client_simulator`, its systemd unit runs as **root** by default, so it needs
-no new sudoers entry and the "four apps need passwordless sudo" count above is unchanged — commands still
-shell out via `sudo <cmd>`, a harmless no-op under root. Two things to keep straight: the netns clients NAT
-out through each interface's single radio MAC, so they are *traffic* load only and never appear to the AP as
-separate associations (the same L2 limit that `client_simulator` documents); and only the physical-interface
-association/MAC churn stresses the AP's association tables. It requires NetworkManager as the active backend,
-same caveat as `wifi_connection_manager`, and refuses up front off-Linux / without `nmcli`+`iw` so macOS dev
-gets a clear JSON error. It also runs a best-effort orphan sweep on startup (`porcupine-*` profiles,
-`porcbr*` bridges, `wfporc-*` namespaces) so a hard restart is idempotent.
+`802-11-wireless.cloned-mac-address random`) plus `iw` for interface listing. Its systemd unit runs as
+**root** by default, so it needs no new sudoers entry and the "four apps need passwordless sudo" count
+above is unchanged — commands still shell out via `sudo <cmd>`, a harmless no-op under root. A single
+intensity slider scales both churn speed (dwell time) and concurrency (how many enlisted interfaces churn
+at once). It requires NetworkManager as the active backend, same caveat as `wifi_connection_manager`, and
+refuses up front off-Linux / without `nmcli`+`iw` so macOS dev gets a clear JSON error. It also runs a
+best-effort orphan sweep on startup (leftover `porcupine-*` NetworkManager profiles) so a hard restart is
+idempotent.
 
 ---
 

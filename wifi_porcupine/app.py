@@ -12,23 +12,14 @@ A single intensity slider scales both how fast interfaces cycle (dwell time)
 and how many cycle at once (concurrency): a supervisor thread reshuffles which
 enlisted interfaces are in the active churning subset each round.
 
-Optionally, each enlisted interface can also carry a small fleet of `ip netns`
-clients that NAT out through it to generate real L3 traffic. This is honestly
-NAT'd behind the interface's single radio MAC -- it is *traffic* load, not
-additional AP associations. Over WiFi you cannot bridge multiple MACs onto one
-station association, so those namespace clients are invisible to the AP at L2;
-only the physical-interface association/MAC churn stresses the association side.
-
 Association/MAC churn goes through NetworkManager (`nmcli`, one connection
-profile per interface with `802-11-wireless.cloned-mac-address random`); the
-netns fleets reuse the client_simulator recipe (bridge + veth + MASQUERADE),
-one bridge/subnet per interface. Both require Linux + privileged tooling, so
-the systemd unit runs this app as root (see deploy/wifi-porcupine.service).
-Off-Linux -- e.g. macOS during development -- every route degrades to a clear
-JSON error instead of crashing. See CLAUDE.md's Environment Split section.
+profile per interface with `802-11-wireless.cloned-mac-address random`).
+This requires Linux + privileged tooling, so the systemd unit runs this app
+as root (see deploy/wifi-porcupine.service). Off-Linux -- e.g. macOS during
+development -- every route degrades to a clear JSON error instead of
+crashing. See CLAUDE.md's Environment Split section.
 """
 
-import ipaddress
 import math
 import os
 import platform
@@ -46,10 +37,8 @@ from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
-# --- Naming (kept short: veth/bridge names must stay under the 15-char IFNAMSIZ limit) ---
+# --- Naming ---
 PROFILE_PREFIX = "porcupine"   # NetworkManager connection profiles: porcupine-<iface>
-BRIDGE_PREFIX = "porcbr"       # per-interface netns bridge: porcbr<idx>
-NS_PREFIX = "wfporc"           # per-client namespace: wfporc-<idx>-<cid>
 
 # --- Intensity model (templated into the UI so the slider bounds can't drift) ---
 INTENSITY_RANGE = (1, 10)
@@ -58,12 +47,6 @@ DWELL_AT_MIN_INTENSITY = (25.0, 45.0)  # (low, high) seconds an interface stays 
 DWELL_AT_MAX_INTENSITY = (2.0, 5.0)    # ... at intensity 10 (fast association storm)
 GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
 RESHUFFLE_INTERVAL_SECONDS = 20        # how often the active churning subset is re-picked
-
-# --- netns traffic multiplier ---
-NETNS_PER_IFACE_RANGE = (1, 50)
-DEFAULT_NETNS_PER_IFACE = 5
-THINK_TIME_RANGE = (2, 8)
-REQUEST_TIMEOUT = 10
 
 NMCLI_TIMEOUT = 15
 CONNECT_TIMEOUT = 30
@@ -76,15 +59,13 @@ run_lock = threading.Lock()
 run_state = {
     "running": False,
     "wifi_mode": None,     # "live" while a run is active
-    "netns_mode": None,    # "netns" | "disabled"
     "enlisted": [],        # interfaces enlisted for this run
     "connected": set(),    # interfaces currently associated
     "config": None,
 }
-stats = {"reconnects": 0, "errors": 0, "requests": 0, "netns_clients": 0, "active_interfaces": 0}
+stats = {"reconnects": 0, "errors": 0, "active_interfaces": 0}
 active_ifaces = set()      # the churning subset chosen by the supervisor
-fleets = {}                # iface -> {"idx","bridge","subnet","iface","clients":[...]}
-workers = []               # per-interface churn threads
+workers = []                # per-interface churn threads
 supervisor_thread = None
 duration_thread = None
 stop_event = threading.Event()
@@ -198,18 +179,6 @@ def detect_wifi_mode():
     return "live", None
 
 
-def detect_netns_mode():
-    """Whether the optional netns traffic multiplier can run. Returns (mode, reason)."""
-    if platform.system() != "Linux":
-        return None, "not running on Linux"
-    if not shutil.which("ip"):
-        return None, "the 'ip' command is not installed"
-    ok, _, _ = _run(["sudo", "-n", "ip", "netns", "list"], timeout=5)
-    if not ok:
-        return None, "passwordless sudo for 'ip' is not available (run as root; see README)"
-    return "netns", None
-
-
 def friendly(raw) -> str:
     """Condense a raw nmcli error to one short human-readable line."""
     raw = (raw or "").strip()
@@ -304,124 +273,6 @@ def read_iface_mac(iface):
 
 
 # ---------------------------------------------------------------------------
-# Optional per-interface netns fleet (bridge + veth + MASQUERADE out the iface).
-# Set up once per run and kept up while the physical interface flaps; traffic
-# just errors during the disconnected windows, which is realistic.
-# ---------------------------------------------------------------------------
-def bridge_name(idx) -> str:
-    return f"{BRIDGE_PREFIX}{idx}"
-
-
-def fleet_subnet(idx) -> "ipaddress.IPv4Network":
-    return ipaddress.ip_network(f"10.210.{idx}.0/24")
-
-
-def ns_name(idx, cid) -> str:
-    return f"{NS_PREFIX}-{idx}-{cid}"
-
-
-def veth_names(idx, cid):
-    """Host-side and namespace-side veth names, kept under the 15-char IFNAMSIZ limit."""
-    return f"pc{idx}h{cid}", f"pc{idx}p{cid}"
-
-
-def create_client_ns(idx, cid, gateway_ip, subnet):
-    """Create one namespace + veth pair attached to the interface's bridge. (ok, ip_or_err)."""
-    ns = ns_name(idx, cid)
-    host_veth, peer_veth = veth_names(idx, cid)
-    ip_addr = str(subnet.network_address + 2 + cid)
-    br = bridge_name(idx)
-    steps = [
-        ["sudo", "ip", "netns", "add", ns],
-        ["sudo", "ip", "link", "add", host_veth, "type", "veth", "peer", "name", peer_veth],
-        ["sudo", "ip", "link", "set", peer_veth, "netns", ns],
-        ["sudo", "ip", "netns", "exec", ns, "ip", "link", "set", peer_veth, "name", "eth0"],
-        ["sudo", "ip", "netns", "exec", ns, "ip", "addr", "add", f"{ip_addr}/{subnet.prefixlen}", "dev", "eth0"],
-        ["sudo", "ip", "netns", "exec", ns, "ip", "link", "set", "eth0", "up"],
-        ["sudo", "ip", "netns", "exec", ns, "ip", "link", "set", "lo", "up"],
-        ["sudo", "ip", "netns", "exec", ns, "ip", "route", "add", "default", "via", gateway_ip],
-        ["sudo", "ip", "link", "set", host_veth, "master", br],
-        ["sudo", "ip", "link", "set", host_veth, "up"],
-    ]
-    for cmd in steps:
-        ok, _, err = _run(cmd)
-        if not ok:
-            _run(["sudo", "ip", "netns", "delete", ns])  # roll back partial creation
-            return False, err.strip() or " ".join(cmd)
-    return True, ip_addr
-
-
-def setup_fleet(iface, idx, count, target_url):
-    """Bring up the bridge + NAT + `count` namespace clients for one interface. Returns fleet|None."""
-    subnet = fleet_subnet(idx)
-    gateway = str(subnet.network_address + 1)
-    br = bridge_name(idx)
-    steps = [
-        ["sudo", "ip", "link", "add", br, "type", "bridge"],
-        ["sudo", "ip", "addr", "add", f"{gateway}/{subnet.prefixlen}", "dev", br],
-        ["sudo", "ip", "link", "set", br, "up"],
-        ["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"],
-        ["sudo", "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", str(subnet), "-o", iface, "-j", "MASQUERADE"],
-        ["sudo", "iptables", "-A", "FORWARD", "-i", br, "-o", iface, "-j", "ACCEPT"],
-        ["sudo", "iptables", "-A", "FORWARD", "-i", iface, "-o", br,
-         "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
-    ]
-    for cmd in steps:
-        ok, _, err = _run(cmd)
-        if not ok:
-            _log(f"[{iface}] netns bridge setup failed: {err.strip() or ' '.join(cmd)}")
-            teardown_fleet({"idx": idx, "bridge": br, "subnet": subnet, "iface": iface, "clients": []})
-            return None
-
-    fleet = {"idx": idx, "bridge": br, "subnet": subnet, "iface": iface, "clients": []}
-    for cid in range(count):
-        ok, ip_or_err = create_client_ns(idx, cid, gateway, subnet)
-        if not ok:
-            _log(f"[{iface}] netns client {cid} failed: {ip_or_err}")
-            continue
-        cstop = threading.Event()
-        t = threading.Thread(
-            target=client_traffic_worker,
-            args=(iface, ns_name(idx, cid), ip_or_err, target_url, cstop),
-            daemon=True,
-        )
-        fleet["clients"].append({"ns": ns_name(idx, cid), "ip": ip_or_err, "stop": cstop, "thread": t})
-        t.start()
-    return fleet
-
-
-def teardown_fleet(fleet):
-    """Best-effort reversal of setup_fleet(); individual failures are ignored."""
-    for c in fleet["clients"]:
-        c["stop"].set()
-    for c in fleet["clients"]:
-        c["thread"].join(timeout=3)
-        _run(["sudo", "ip", "netns", "delete", c["ns"]])
-    subnet, br, iface = fleet["subnet"], fleet["bridge"], fleet["iface"]
-    for cmd in [
-        ["sudo", "iptables", "-t", "nat", "-D", "POSTROUTING", "-s", str(subnet), "-o", iface, "-j", "MASQUERADE"],
-        ["sudo", "iptables", "-D", "FORWARD", "-i", br, "-o", iface, "-j", "ACCEPT"],
-        ["sudo", "iptables", "-D", "FORWARD", "-i", iface, "-o", br,
-         "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
-        ["sudo", "ip", "link", "del", br],
-    ]:
-        _run(cmd)
-
-
-def client_traffic_worker(iface, ns, ip, target_url, cstop):
-    """Continuously fetch target_url from inside one namespace, with random think time."""
-    while not cstop.is_set() and not stop_event.is_set():
-        cmd = ["sudo", "ip", "netns", "exec", ns, "curl", "-s", "-o", "/dev/null",
-               "--max-time", str(REQUEST_TIMEOUT), target_url]
-        ok, _, _ = _run(cmd, timeout=REQUEST_TIMEOUT + 2)
-        with run_lock:
-            stats["requests"] += 1
-            if not ok:
-                stats["errors"] += 1
-        _interruptible_sleep(random.uniform(*THINK_TIME_RANGE), cstop)
-
-
-# ---------------------------------------------------------------------------
 # Churn engine
 # ---------------------------------------------------------------------------
 def churn_worker(iface, config):
@@ -490,7 +341,7 @@ def duration_timer(minutes):
 
 
 def start_run(config):
-    """Heavy setup for a run: profiles, optional netns fleets, churn threads. Runs in a thread.
+    """Heavy setup for a run: profiles + churn threads. Runs in a thread.
 
     run_state['running'] has already been set True by the start route, so /status
     reports 'running' immediately even while this setup is still in progress.
@@ -500,23 +351,12 @@ def start_run(config):
     _log(
         f"Starting porcupine run: {len(config['interfaces'])} interface(s) -> "
         f"SSID '{config['ssid']}', intensity {config['intensity']}"
-        + (f", {config['netns_per_iface']} netns client(s)/iface -> {config['target_url']}"
-           if config["netns_enabled"] else "")
     )
 
     for iface in config["interfaces"]:
         ok, msg = create_profile(iface, config["ssid"], config["password"])
         if not ok:
             _log(f"[{iface}] profile create failed: {friendly(msg)}")
-
-    if config["netns_enabled"]:
-        for idx, iface in enumerate(config["interfaces"]):
-            fleet = setup_fleet(iface, idx, config["netns_per_iface"], config["target_url"])
-            if fleet:
-                with run_lock:
-                    fleets[iface] = fleet
-                    stats["netns_clients"] += len(fleet["clients"])
-                _log(f"[{iface}] netns fleet up: {len(fleet['clients'])} client(s) on {fleet['subnet']}")
 
     workers.clear()
     for iface in config["interfaces"]:
@@ -531,13 +371,12 @@ def start_run(config):
 
 
 def stop_run():
-    """Stop a run: halt churn, disconnect + delete profiles, tear down netns fleets. Idempotent."""
+    """Stop a run: halt churn, disconnect + delete profiles. Idempotent."""
     with run_lock:
         if not run_state["running"]:
             return False
         run_state["running"] = False
         enlisted = list(run_state["enlisted"])
-        fleet_list = list(fleets.values())
     stop_event.set()
 
     for t in workers:
@@ -549,15 +388,10 @@ def stop_run():
         bring_down(iface)
         delete_profile(iface)
 
-    for fleet in fleet_list:
-        teardown_fleet(fleet)
-
     with run_lock:
         run_state["connected"] = set()
         run_state["wifi_mode"] = None
-        run_state["netns_mode"] = None
         active_ifaces.clear()
-        fleets.clear()
         stats["active_interfaces"] = 0
     _log("Run stopped; interfaces disconnected and profiles removed.")
     stop_event.clear()
@@ -565,7 +399,7 @@ def stop_run():
 
 
 def _sweep_orphans():
-    """Best-effort cleanup of leftovers from a previous run killed mid-flight (root/Linux only)."""
+    """Best-effort cleanup of leftover profiles from a previous run killed mid-flight (root/Linux only)."""
     if platform.system() != "Linux":
         return
     ok, out, _ = _run(["sudo", "-n", "nmcli", "-t", "-f", "NAME", "connection", "show"], timeout=5)
@@ -574,18 +408,6 @@ def _sweep_orphans():
             name = line.strip()
             if name.startswith(PROFILE_PREFIX + "-"):
                 _run(["sudo", "-n", "nmcli", "connection", "delete", name])
-    ok, out, _ = _run(["sudo", "-n", "ip", "netns", "list"], timeout=5)
-    if ok:
-        for line in out.splitlines():
-            parts = line.split()
-            if parts and parts[0].startswith(NS_PREFIX + "-"):
-                _run(["sudo", "-n", "ip", "netns", "delete", parts[0]])
-    ok, out, _ = _run(["sudo", "-n", "ip", "-o", "link", "show", "type", "bridge"], timeout=5)
-    if ok:
-        for line in out.splitlines():
-            m = re.match(r"\d+:\s+([^:@]+)", line)
-            if m and m.group(1).strip().startswith(BRIDGE_PREFIX):
-                _run(["sudo", "-n", "ip", "link", "del", m.group(1).strip()])
 
 
 # ---------------------------------------------------------------------------
@@ -599,9 +421,6 @@ def index():
         intensity_min=INTENSITY_RANGE[0],
         intensity_max=INTENSITY_RANGE[1],
         intensity_default=DEFAULT_INTENSITY,
-        netns_min=NETNS_PER_IFACE_RANGE[0],
-        netns_max=NETNS_PER_IFACE_RANGE[1],
-        netns_default=DEFAULT_NETNS_PER_IFACE,
     )
 
 
@@ -613,13 +432,10 @@ def api_hostname():
 @app.route("/api/interfaces")
 def api_interfaces():
     wifi_mode, wifi_reason = detect_wifi_mode()
-    netns_mode, netns_reason = detect_netns_mode()
     return jsonify({
         "interfaces": get_wireless_interfaces(),
         "wifi_supported": wifi_mode is not None,
         "wifi_reason": wifi_reason,
-        "netns_supported": netns_mode is not None,
-        "netns_reason": netns_reason,
     })
 
 
@@ -629,7 +445,6 @@ def api_status():
         payload = {
             "running": run_state["running"],
             "wifi_mode": run_state["wifi_mode"],
-            "netns_mode": run_state["netns_mode"],
             "enlisted": list(run_state["enlisted"]),
         }
         payload.update(stats)
@@ -691,32 +506,12 @@ def api_start():
     if duration < 1:
         return jsonify({"error": "Duration must be at least 1 minute."}), 400
 
-    netns_enabled = bool(data.get("netns_enabled"))
-    netns_per = DEFAULT_NETNS_PER_IFACE
-    target_url = (data.get("target_url") or "").strip()
-    if netns_enabled:
-        netns_mode, netns_reason = detect_netns_mode()
-        if netns_mode is None:
-            return jsonify({"error": f"netns clients unavailable: {netns_reason}."}), 400
-        try:
-            netns_per = int(data.get("netns_per_iface", DEFAULT_NETNS_PER_IFACE))
-        except (TypeError, ValueError):
-            return jsonify({"error": "netns clients per interface must be a number."}), 400
-        if not (NETNS_PER_IFACE_RANGE[0] <= netns_per <= NETNS_PER_IFACE_RANGE[1]):
-            return jsonify({"error": f"netns clients per interface must be between "
-                                     f"{NETNS_PER_IFACE_RANGE[0]} and {NETNS_PER_IFACE_RANGE[1]}."}), 400
-        if not target_url:
-            return jsonify({"error": "A target URL is required when netns clients are enabled."}), 400
-
     config = {
         "interfaces": clean,
         "ssid": ssid,
         "password": password,
         "intensity": intensity,
         "duration_minutes": duration,
-        "netns_enabled": netns_enabled,
-        "netns_per_iface": netns_per,
-        "target_url": target_url,
     }
 
     with run_lock:
@@ -724,14 +519,11 @@ def api_start():
             return jsonify({"error": "A run is already in progress."}), 409
         run_state["running"] = True
         run_state["wifi_mode"] = "live"
-        run_state["netns_mode"] = "netns" if netns_enabled else "disabled"
         run_state["enlisted"] = clean
         run_state["connected"] = set()
         run_state["config"] = config
-        stats.update({"reconnects": 0, "errors": 0, "requests": 0,
-                      "netns_clients": 0, "active_interfaces": 0})
+        stats.update({"reconnects": 0, "errors": 0, "active_interfaces": 0})
         active_ifaces.clear()
-        fleets.clear()
     # Reset the log ring buffer so a new run's Live Activity starts clean rather
     # than replaying the previous run's lines (the client polls api/output?since=0).
     with log_lock:
@@ -749,7 +541,7 @@ def api_stop():
     return jsonify({"status": "stopped" if stopped else "no run in progress"})
 
 
-# Sweep any leftovers from a run that was killed mid-flight, so restarts are idempotent.
+# Sweep any leftover profiles from a run that was killed mid-flight, so restarts are idempotent.
 _sweep_orphans()
 
 

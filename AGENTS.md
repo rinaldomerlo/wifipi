@@ -286,22 +286,15 @@ Project Root Structure:
   `compute_dwell_range`) and concurrency (`compute_concurrency` — how many enlisted interfaces churn at
   once). A supervisor thread reshuffles the active random subset every `RESHUFFLE_INTERVAL_SECONDS`. The
   slider bounds are templated from the Python constants so they can't drift.
-- **Optional netns traffic multiplier**: when enabled, each interface also gets a small fleet of `ip netns`
-  clients (reusing the `client_simulator` bridge/veth/MASQUERADE recipe, one `porcbr<idx>` bridge and
-  `10.210.<idx>.0/24` subnet per interface) generating HTTP load to a target URL. This is honestly *traffic*
-  load only: the clients NAT out through the interface's single radio MAC and never appear to the AP as
-  separate associations — the same L2 limit `client_simulator` documents. Fleets are set up once per run and
-  persist while the physical interface flaps; traffic simply errors during the disconnected windows.
 - **Log**: a bounded `deque` + monotonic cursor (like `iperf_congestion_generator`), polled at
   `GET /api/output?since=`, so reloads/reattach and multiple tabs replay cleanly rather than stealing a
   destructive stream. The page reattaches to a run already in progress on load.
 - **Degradation & idempotency**: refuses up front off-Linux or without `nmcli`/`iw`, returning a clear JSON
-  error so macOS dev never crashes; `netns` is only offered when `sudo -n ip netns list` succeeds. A
-  best-effort startup sweep removes leftover `porcupine-*` profiles, `porcbr*` bridges and `wfporc-*`
-  namespaces so a hard restart is idempotent.
-- **System Privilege Requirement**: needs `nmcli` + `ip`/`iptables`/`sysctl`. Like `client_simulator`, the
-  unit runs as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a
-  no-op under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.
+  error so macOS dev never crashes. A best-effort startup sweep removes leftover `porcupine-*` profiles so a
+  hard restart is idempotent.
+- **System Privilege Requirement**: needs only `nmcli` (+ `iw` for interface listing). The unit still runs
+  as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a no-op
+  under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.
 
 ---
 

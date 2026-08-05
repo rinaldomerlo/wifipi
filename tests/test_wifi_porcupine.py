@@ -22,15 +22,13 @@ class TestWifiPorcupine(unittest.TestCase):
         wp_app.config['TESTING'] = True
         self.client = wp_app.test_client()
         wp_app_module.run_state.update({
-            "running": False, "wifi_mode": None, "netns_mode": None,
+            "running": False, "wifi_mode": None,
             "enlisted": [], "connected": set(), "config": None,
         })
         wp_app_module.stats.update({
-            "reconnects": 0, "errors": 0, "requests": 0,
-            "netns_clients": 0, "active_interfaces": 0,
+            "reconnects": 0, "errors": 0, "active_interfaces": 0,
         })
         wp_app_module.active_ifaces.clear()
-        wp_app_module.fleets.clear()
         wp_app_module.stop_event.clear()
 
     # -- basic routes --------------------------------------------------
@@ -107,16 +105,6 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertNotIn('wifi-sec.psk', args)
         self.assertNotIn('wifi-sec.key-mgmt', args)
 
-    def test_veth_names_within_ifnamsiz_limit(self):
-        host, peer = wp_app_module.veth_names(9, 49)
-        self.assertLessEqual(len(host), 15)
-        self.assertLessEqual(len(peer), 15)
-        self.assertNotEqual(host, peer)
-
-    def test_fleet_subnet_allocation(self):
-        self.assertEqual(str(wp_app_module.fleet_subnet(0)), '10.210.0.0/24')
-        self.assertEqual(str(wp_app_module.fleet_subnet(2)), '10.210.2.0/24')
-
     # -- mode detection --------------------------------------------------
 
     def test_detect_wifi_mode_non_linux(self):
@@ -125,20 +113,6 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertIsNone(mode)
         self.assertIn('Linux', reason)
 
-    def test_detect_netns_mode_non_linux(self):
-        with patch('wifi_porcupine.app.platform.system', return_value='Darwin'):
-            mode, reason = wp_app_module.detect_netns_mode()
-        self.assertIsNone(mode)
-        self.assertIn('Linux', reason)
-
-    def test_detect_netns_mode_no_passwordless_sudo(self):
-        with patch('wifi_porcupine.app.platform.system', return_value='Linux'), \
-             patch('wifi_porcupine.app.shutil.which', return_value='/usr/sbin/ip'), \
-             patch('wifi_porcupine.app._run', return_value=(False, '', 'sudo: a password is required')):
-            mode, reason = wp_app_module.detect_netns_mode()
-        self.assertIsNone(mode)
-        self.assertIn('sudo', reason)
-
     # -- interface enumeration (mocked subprocess boundary) --------------
 
     def test_get_wireless_interfaces_parses_iw_dev(self):
@@ -146,29 +120,6 @@ class TestWifiPorcupine(unittest.TestCase):
         with patch('wifi_porcupine.app.subprocess.check_output', return_value=iw_output):
             ifaces = wp_app_module.get_wireless_interfaces()
         self.assertEqual(ifaces, ['wlan0', 'wlan1'])
-
-    # -- namespace command sequence (mocked subprocess boundary) ---------
-
-    def test_create_client_ns_command_sequence(self):
-        subnet = wp_app_module.fleet_subnet(0)
-        with patch('wifi_porcupine.app._run', return_value=(True, '', '')) as mock_run:
-            ok, ip_addr = wp_app_module.create_client_ns(0, 0, '10.210.0.1', subnet)
-        self.assertTrue(ok)
-        self.assertEqual(ip_addr, '10.210.0.2')
-        first_cmd = mock_run.call_args_list[0][0][0]
-        self.assertEqual(first_cmd[:4], ['sudo', 'ip', 'netns', 'add'])
-        self.assertIn('wfporc-0-0', first_cmd)
-
-    def test_create_client_ns_failure_rolls_back(self):
-        subnet = wp_app_module.fleet_subnet(0)
-        # First command (netns add) succeeds, second fails -> rollback deletes the ns.
-        with patch('wifi_porcupine.app._run', side_effect=[(True, '', ''), (False, '', 'boom'),
-                                                           (True, '', '')]) as mock_run:
-            ok, err = wp_app_module.create_client_ns(0, 0, '10.210.0.1', subnet)
-        self.assertFalse(ok)
-        self.assertEqual(err, 'boom')
-        last_cmd = mock_run.call_args_list[-1][0][0]
-        self.assertEqual(last_cmd, ['sudo', 'ip', 'netns', 'delete', 'wfporc-0-0'])
 
     # -- /api/start validation ------------------------------------------
 
@@ -203,17 +154,6 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('wlan9', response.get_json()['error'])
 
-    def test_start_route_netns_requires_target_url(self):
-        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
-             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']), \
-             patch('wifi_porcupine.app.detect_netns_mode', return_value=('netns', None)):
-            response = self.client.post('/api/start', json={
-                "interfaces": ["wlan0"], "ssid": "MyNet",
-                "netns_enabled": True, "target_url": "",
-            })
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('target URL', response.get_json()['error'])
-
     @patch('wifi_porcupine.app.threading.Thread')
     def test_start_route_valid_spawns_background_thread(self, mock_thread):
         with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
@@ -233,7 +173,6 @@ class TestWifiPorcupine(unittest.TestCase):
         config = kwargs['args'][0]
         self.assertEqual(config['interfaces'], ['wlan0', 'wlan1'])
         self.assertEqual(config['intensity'], 7)
-        self.assertFalse(config['netns_enabled'])
         self.assertTrue(wp_app_module.run_state['running'])
 
     def test_stop_route_when_not_running(self):
