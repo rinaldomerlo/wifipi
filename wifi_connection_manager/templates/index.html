@@ -397,7 +397,6 @@
     let pendingConnectSsid = null;
     let pendingConnectMode = 'single'; // 'single' -> api/connect, 'all' -> api/connect-all
     let scanning = false;
-    let savedNetworkNames = new Set();
     let connectedSsids = new Set();   // SSIDs currently connected on ANY interface
     let ifaceSsidMap = {};            // interface -> connected ssid
     let selectedNetwork = null;       // { ssid, security } — target for "Connect all idle"
@@ -572,7 +571,6 @@
 
     function renderSaved(data) {
         lastSavedData = data;
-        savedNetworkNames = new Set(data.success ? data.saved.map(s => s.name) : []);
         renderSavedTable();
     }
 
@@ -664,7 +662,7 @@
         fetchSaved();
     }
 
-    function openConnectModal(ssid, security, mode) {
+    async function openConnectModal(ssid, security, mode) {
         pendingConnectSsid = ssid;
         pendingConnectMode = mode || 'single';
         modalSsid.textContent = pendingConnectMode === 'all' ? `Connect all idle to ${ssid}` : `Connect to ${ssid}`;
@@ -673,6 +671,19 @@
         pwInput.value = '';
         modal.classList.add('show');
         setTimeout(() => pwInput.focus(), 50);
+
+        // Best-effort auto-fill from a saved profile — e.g. one already connected on a
+        // different interface, whose secrets don't automatically carry over to a fresh
+        // per-device profile nmcli may need to create for this one. No match is silent,
+        // not an error; the operator can still type a password by hand.
+        try {
+            const res = await fetch('api/saved-password?ssid=' + encodeURIComponent(ssid), { cache: 'no-store' });
+            const data = await res.json();
+            if (pendingConnectSsid === ssid && data.success && data.found && data.password) {
+                pwInput.value = data.password;
+                modalHint.textContent = `Security: ${security} — password auto-filled from a saved network.`;
+            }
+        } catch (e) { /* best-effort convenience only */ }
     }
 
     function closeConnectModal() {
@@ -681,7 +692,7 @@
         pendingConnectMode = 'single';
     }
 
-    async function connect(ssid, password, security) {
+    async function connect(ssid, password) {
         try {
             const res = await fetch('api/connect', {
                 method: 'POST',
@@ -693,11 +704,6 @@
                 showToast(data.message || `Connected to ${ssid}.`, false);
                 closeConnectModal();
                 refreshAll();
-            } else if (data.needs_password && !modal.classList.contains('show')) {
-                // No saved credentials on file for this SSID (the backend already tried
-                // reusing a saved profile's PSK, e.g. from another connected interface)
-                // — only now ask the operator to type one in.
-                openConnectModal(ssid, security || 'WPA2', 'single');
             } else {
                 if (modal.classList.contains('show')) {
                     modalError.textContent = data.error;
@@ -730,12 +736,6 @@
                 showToast(`Connected ${data.connected}, failed ${data.failed}.`, isFailure);
                 closeConnectModal();
                 refreshAll();
-            } else if (data.needs_password && !modal.classList.contains('show')) {
-                // No saved credentials on file for this SSID (the backend already tried
-                // reusing a saved profile's PSK, e.g. from an already-connected
-                // interface) — only now ask the operator to type one in.
-                const security = (selectedNetwork && selectedNetwork.ssid === ssid) ? selectedNetwork.security : 'WPA2';
-                openConnectModal(ssid, security, 'all');
             } else {
                 const message = data.error || 'Connect-all failed.';
                 if (modal.classList.contains('show')) {
@@ -849,19 +849,19 @@
         }
         const savedConnectBtn = e.target.closest('[data-connect-saved]');
         if (savedConnectBtn) {
-            // NetworkManager already has credentials for saved profiles — no password needed.
-            connect(savedConnectBtn.getAttribute('data-connect-saved'), '');
+            // Route through the connect dialog rather than connecting blind — this saved
+            // profile may be bound to a different interface than the one being targeted
+            // here, so its secrets don't automatically carry over; the dialog auto-fills
+            // the password from storage instead.
+            openConnectModal(savedConnectBtn.getAttribute('data-connect-saved'), 'Saved network', 'single');
             return;
         }
         const connectBtn = e.target.closest('[data-connect-ssid]');
         if (connectBtn) {
             const ssid = connectBtn.getAttribute('data-connect-ssid');
             const security = connectBtn.getAttribute('data-connect-security');
-            if (security === 'Open' || savedNetworkNames.has(ssid)) {
-                // Open, or already saved — NetworkManager has (or needs no) credentials
-                // (and if a saved profile turns out not to carry over to this interface,
-                // /api/connect now retries with the saved PSK before giving up).
-                connect(ssid, '', security);
+            if (security === 'Open') {
+                connect(ssid, '');
             } else {
                 openConnectModal(ssid, security, 'single');
             }
@@ -907,13 +907,13 @@
             return;
         }
         const { ssid, security } = selectedNetwork;
-        if (security === 'Open' || savedNetworkNames.has(ssid)) {
-            // Open, or already saved — NetworkManager has (or needs no) credentials
-            // (and if a saved profile turns out not to carry over to some idle
-            // interface, /api/connect-all now retries with the saved PSK before
-            // failing that interface).
+        if (security === 'Open') {
             connectAll(ssid, '');
         } else {
+            // Always confirm via the dialog rather than connecting blind — a saved
+            // profile for this SSID may be bound to a different interface than the idle
+            // ones being targeted here, so its secrets don't automatically carry over.
+            // The dialog auto-fills the password from storage when one is on file.
             openConnectModal(ssid, security, 'all');
         }
     });

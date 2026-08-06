@@ -109,12 +109,6 @@ def friendly_connect_error(raw_error: str) -> str:
     return f"Connection failed: {raw_error}"
 
 
-def _needs_secrets(raw_error: str) -> bool:
-    """True if a failed `nmcli device wifi connect` looks like it was rejected for a
-    missing/incorrect password rather than any other reason (AP out of range, etc)."""
-    return bool(raw_error) and bool(re.search(MISSING_SECRETS_PATTERN, raw_error, re.IGNORECASE))
-
-
 def _connect_iface(ssid: str, iface: str, password: str):
     """Run `nmcli device wifi connect <ssid> ifname <iface> [password <password>]`.
 
@@ -166,6 +160,21 @@ def api_hostname():
 def api_interfaces():
     """List every WiFi-capable device nmcli knows about, for the target-interface selector."""
     return jsonify({"success": True, "interfaces": get_wireless_interfaces()})
+
+
+@app.route("/api/saved-password")
+def api_saved_password():
+    """Look up a saved profile's PSK for `ssid`, so the connect dialog's password field
+    can be auto-filled when this SSID is already saved (e.g. from another interface).
+    `found=False` covers both "no matching saved profile" and "matched, but nothing
+    stored" -- neither is an error, it's just nothing to fill in, and the operator can
+    still type a password by hand.
+    """
+    ssid = (request.args.get("ssid") or "").strip()
+    if not ssid:
+        return jsonify({"success": False, "error": "ssid is required."}), 400
+    password, _ = _saved_psk(ssid)
+    return jsonify({"success": True, "found": password is not None, "password": password})
 
 
 def interface_status(iface: str) -> dict:
@@ -346,23 +355,6 @@ def api_connect():
         return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
 
     ok, err = _connect_iface(ssid, iface, password)
-    if not ok and not password and _needs_secrets(err):
-        # A profile saved for this SSID may be bound to a different interface (e.g. the
-        # one it's already connected on) — nmcli then creates or matches a fresh
-        # per-device profile with no secret of its own. Reuse the known-good saved PSK
-        # explicitly instead of asking the operator to re-type a password already on
-        # file; the caller (single-connect flow) only ever reaches this with an empty
-        # password when it already believed the SSID was saved.
-        saved_password, lookup_err = _saved_psk(ssid)
-        if saved_password:
-            ok, err = _connect_iface(ssid, iface, saved_password)
-        elif lookup_err:
-            return jsonify({
-                "success": False,
-                "needs_password": True,
-                "error": f"No saved credentials found for {ssid}.",
-            }), 200
-
     if not ok:
         return jsonify({"success": False, "error": friendly_connect_error(err)}), 200
 
@@ -409,29 +401,9 @@ def api_connect_all():
     if only_idle:
         ifaces = [i for i in ifaces if not interface_status(i)["connected"]]
 
-    if not ifaces:
-        return jsonify({"success": True, "results": [], "connected": 0, "failed": 0})
-
     results = []
     for iface in ifaces:
         ok, err = _connect_iface(ssid, iface, password)
-        if not ok and not password and _needs_secrets(err):
-            # A profile saved for this SSID (e.g. from the interface that's already
-            # connected) doesn't carry over automatically — nmcli binds a fresh
-            # per-device profile and needs the secret again. Look the saved PSK up once
-            # and reuse it explicitly for this and every remaining interface instead of
-            # failing each one with "Incorrect password"; only ask the caller to prompt
-            # if nothing is on file at all.
-            saved_password, lookup_err = _saved_psk(ssid)
-            if saved_password:
-                password = saved_password
-                ok, err = _connect_iface(ssid, iface, password)
-            elif lookup_err:
-                return jsonify({
-                    "success": False,
-                    "needs_password": True,
-                    "error": f"No saved credentials found for {ssid}.",
-                }), 200
         if ok:
             results.append({"interface": iface, "ok": True, "message": f"Connected to {ssid}."})
         else:
