@@ -13,7 +13,36 @@ import subprocess
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 
+try:
+    import pwd
+except ImportError:  # Windows has no pwd module; not a supported deployment target
+    pwd = None
+
 app = Flask(__name__)
+
+# System user the persistent iperf3-*.service units run as (see deploy/iperf3-*.service).
+# Ad-hoc servers launched from the GUI should match, rather than inheriting whatever
+# user the manager itself runs as (root, by default -- see deploy/iperf-server-manager.service).
+IPERF3_RUN_AS_USER = "iperf3"
+
+
+def get_iperf3_run_as_ids():
+    """
+    Resolve the (uid, gid) to launch ad-hoc iperf3 servers as, mirroring the
+    User=iperf3 systemd units in deploy/. Returns None -- meaning "inherit the
+    manager's own user" -- when we can't drop privileges to that account: we're not
+    root (so setuid would just fail), or the account doesn't exist (e.g. macOS dev,
+    or a Pi where the sudoers/user setup from README.md hasn't been done yet).
+    """
+    if pwd is None or os.name != "posix":
+        return None
+    if os.geteuid() != 0:
+        return None
+    try:
+        pw = pwd.getpwnam(IPERF3_RUN_AS_USER)
+    except KeyError:
+        return None
+    return pw.pw_uid, pw.pw_gid
 
 
 def get_hostname() -> str:
@@ -296,19 +325,24 @@ def start_server():
     if one_off:
         cmd.append("--one-off")
 
+    popen_kwargs = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "start_new_session": True
+    }
+    run_as = get_iperf3_run_as_ids()
+    if run_as:
+        popen_kwargs["user"], popen_kwargs["group"] = run_as
+
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         return jsonify({
             "success": True,
             "message": f"iperf3 server started successfully on port {port}",
             "pid": proc.pid,
             "port": port,
-            "command": " ".join(cmd)
+            "command": " ".join(cmd),
+            "run_as": IPERF3_RUN_AS_USER if run_as else None
         })
     except Exception as e:
         return jsonify({

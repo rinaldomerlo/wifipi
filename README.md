@@ -139,18 +139,20 @@ those cards.
 Copy the units you want. For example, a **monitor Pi**:
 
 ```bash
-for u in wifi-monitor roaming-monitor network-device-scanner wifi-connection-manager; do
-    sudo cp deploy/$u.service /etc/systemd/system/
-done
+sudo cp deploy/wifi-monitor.service /etc/systemd/system/
+sudo cp deploy/roaming-monitor.service /etc/systemd/system/
+sudo cp deploy/network-device-scanner.service /etc/systemd/system/
+sudo cp deploy/wifi-connection-manager.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
 …or a **traffic-generator Pi**:
 
 ```bash
-for u in iperf-generator web-browsing-simulator client-simulator wifi-porcupine; do
-    sudo cp deploy/$u.service /etc/systemd/system/
-done
+sudo cp deploy/iperf-generator.service /etc/systemd/system/
+sudo cp deploy/web-browsing-simulator.service /etc/systemd/system/
+sudo cp deploy/client-simulator.service /etc/systemd/system/
+sudo cp deploy/wifi-porcupine.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -185,7 +187,11 @@ deeper logs, `sudo journalctl -u <unit> -e`.
 
 #### Multi-Port iPerf3 Server Services (Optional)
 
-In addition to the web application services, example systemd service files are provided in `deploy/` for persistent multi-port `iperf3` server daemons (ports 5202, 5203, 5204):
+In addition to the web application services, example systemd service files are provided in `deploy/` for persistent multi-port `iperf3` server daemons (ports 5202, 5203, 5204). These units run as a dedicated `iperf3` system user rather than root (`User=iperf3` in each `.service` file), so create that account first — otherwise `systemctl start` fails with `status=217/USER`:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin iperf3
+```
 
 ```bash
 sudo cp deploy/iperf3-5202.service /etc/systemd/system/
@@ -196,6 +202,8 @@ sudo systemctl enable --now iperf3-5202 iperf3-5203 iperf3-5204
 ```
 
 These multi-port iPerf3 server daemons will automatically be discovered and can be managed directly through the **iPerf3 Server Manager** UI (`/iperfserver/`).
+
+The same `iperf3` account is also what the Server Manager's "launch a new server" action (ad-hoc servers, as opposed to the persistent units above) uses when it starts a process: if the manager is running as root — its default — it drops privileges to `iperf3` before exec'ing, so ad-hoc and persistent servers end up owned by the same unprivileged account instead of the ad-hoc ones running as root. If the `iperf3` account doesn't exist, or the manager has been reconfigured to run as a non-root user itself, ad-hoc servers fall back to running as the manager's own user rather than failing.
 
 ### Step 5: Configure Nginx Reverse Proxy & Default Landing Page
 
@@ -222,9 +230,10 @@ same as it already needs for `/opt/wifipi/www`.
 
 2. Copy in only the snippets for the apps you installed in Step 4. For example, the same **monitor Pi**:
    ```bash
-   for a in wifimon roaming devices wificonnect; do
-       sudo cp deploy/nginx.d/$a.conf /etc/nginx/wifipi.d/
-   done
+   sudo cp deploy/nginx.d/wifimon.conf /etc/nginx/wifipi.d/
+   sudo cp deploy/nginx.d/roaming.conf /etc/nginx/wifipi.d/
+   sudo cp deploy/nginx.d/devices.conf /etc/nginx/wifipi.d/
+   sudo cp deploy/nginx.d/wificonnect.conf /etc/nginx/wifipi.d/
    ```
 
 3. Install the WebSocket upgrade map — but only if you installed the Web Terminal. This has to be a
