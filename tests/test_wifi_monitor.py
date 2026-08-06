@@ -2,6 +2,7 @@ import importlib
 import os
 import socket
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,9 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
     def setUp(self):
         wifi_app.config['TESTING'] = True
         self.client = wifi_app.test_client()
+        # Scan coalescing state is module-level (shared across requests by
+        # design); clear it so tests don't leak cached scans into each other.
+        wifi_app_module._reset_scan_cache()
 
     def test_index_route_renders_embedded_css(self):
         response = self.client.get('/')
@@ -77,6 +81,60 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
         data = response.get_json()
         self.assertFalse(data['success'])
         self.assertIn('Scan failed', data['error'])
+
+    def test_concurrent_scans_coalesce_to_one_iw_call(self):
+        # Several dashboard viewers polling at once must never race each other
+        # into 'device is busy' -- only one real scan should run.
+        call_count = {'n': 0}
+
+        def slow_scan(interface, max_retries=2):
+            call_count['n'] += 1
+            threading.Event().wait(0.15)  # simulate a real scan taking a moment
+            return ('', None)
+
+        with patch('wifi_utilization_monitor.app.run_live_scan', side_effect=slow_scan):
+            threads = [
+                threading.Thread(target=lambda: self.client.get('/api/scan?interface=wlan0'))
+                for _ in range(4)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        self.assertEqual(call_count['n'], 1)
+
+    def test_scan_cache_expires_after_ttl(self):
+        # A stale cache shouldn't be served forever -- once it ages out, the
+        # next request must trigger a fresh scan.
+        with patch('wifi_utilization_monitor.app.run_live_scan', return_value=('', None)) as mock_scan:
+            self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(mock_scan.call_count, 1)
+
+            self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(mock_scan.call_count, 1, "second request within the TTL should reuse the cache")
+
+            wifi_app_module._scan_cache['wlan0']['ts'] -= wifi_app_module.SCAN_CACHE_TTL_SECONDS + 1
+            self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(mock_scan.call_count, 2, "request after the TTL should re-scan")
+
+    def test_failed_scans_are_not_cached(self):
+        # A transient failure shouldn't be pinned in the cache for other
+        # viewers, or block the caller's own next retry.
+        with patch('wifi_utilization_monitor.app.run_live_scan',
+                   return_value=(None, 'Command failed: iw dev wlan0 scan')) as mock_scan:
+            self.client.get('/api/scan?interface=wlan0')
+            self.client.get('/api/scan?interface=wlan0')
+
+        self.assertEqual(mock_scan.call_count, 2)
+
+    def test_different_interfaces_scan_independently(self):
+        with patch('wifi_utilization_monitor.app.run_live_scan', return_value=('', None)) as mock_scan:
+            self.client.get('/api/scan?interface=wlan0')
+            self.client.get('/api/scan?interface=wlan1')
+
+        self.assertEqual(mock_scan.call_count, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

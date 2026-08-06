@@ -357,7 +357,9 @@ Both applications share a unified design system:
 Production deployments avoid Flask development debug mode (`python3 app.py`) in favor of a robust WSGI stack:
 
 1. **WSGI Server**: **Gunicorn** (`gunicorn>=20.1.0`)
-   - WiFi Monitor worker: bound to `0.0.0.0:5000` (2 workers).
+   - WiFi Monitor worker: bound to `0.0.0.0:5000` (1 worker, multi-threaded -- must stay a single
+     process, since it coalesces concurrent `/api/scan` requests behind an in-process lock + short
+     cache to stop multiple dashboard viewers from racing each other into `iw`'s "device is busy").
    - iPerf Generator worker: bound to `0.0.0.0:5001` (1 worker, multi-threaded for SSE streaming).
    - iPerf Server Manager worker: bound to `0.0.0.0:5002` (2 workers).
    - WiFi Connection Manager worker: bound to `0.0.0.0:5003` (2 workers).

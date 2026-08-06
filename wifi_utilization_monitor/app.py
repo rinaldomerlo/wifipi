@@ -3,6 +3,8 @@ import os
 import sys
 import socket
 import subprocess
+import threading
+import time
 from datetime import datetime
 from flask import Flask, jsonify, render_template, request
 
@@ -11,6 +13,61 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from parser import parse_scan_output
 
 app = Flask(__name__)
+
+# Every dashboard tab drives its own client-side auto-refresh timer and calls
+# /api/scan independently -- with several browsers open on the same host that
+# means several near-simultaneous 'sudo iw scan' invocations against one radio,
+# which the radio itself rejects with "device is busy" when they overlap.
+# Coalesce concurrent/rapid requests per interface behind a lock + short-lived
+# cache so only one real scan is ever in flight, and other callers within the
+# cache window share its result instead of racing it. Requires the gunicorn
+# service to run as a single worker (threads, not processes) -- see
+# deploy/wifi-monitor.service -- since this state is in-process memory.
+SCAN_CACHE_TTL_SECONDS = 4
+_scan_cache = {}  # interface -> {'ts': float, 'raw': str, 'error': str|None}
+_scan_locks = {}  # interface -> threading.Lock
+_scan_locks_guard = threading.Lock()  # protects creation of entries in _scan_locks
+
+
+def _get_scan_lock(interface):
+    with _scan_locks_guard:
+        lock = _scan_locks.get(interface)
+        if lock is None:
+            lock = threading.Lock()
+            _scan_locks[interface] = lock
+        return lock
+
+
+def get_scan_result(interface):
+    """Return a recent scan for `interface`, running a fresh one if needed.
+
+    At most one 'iw scan' runs per interface at a time; concurrent callers
+    block on that scan and then reuse its result rather than starting their
+    own. Only successful scans (including legitimately-empty ones) are
+    cached -- a transient failure shouldn't be pinned for other viewers or
+    for the caller's own next retry.
+    """
+    cached = _scan_cache.get(interface)
+    if cached and (time.monotonic() - cached['ts']) < SCAN_CACHE_TTL_SECONDS:
+        return cached['raw'], cached['error']
+
+    with _get_scan_lock(interface):
+        # Re-check: another thread may have just finished scanning while we
+        # were waiting on the lock.
+        cached = _scan_cache.get(interface)
+        if cached and (time.monotonic() - cached['ts']) < SCAN_CACHE_TTL_SECONDS:
+            return cached['raw'], cached['error']
+
+        raw, error = run_live_scan(interface)
+        if error is None:
+            _scan_cache[interface] = {'ts': time.monotonic(), 'raw': raw, 'error': None}
+        return raw, error
+
+
+def _reset_scan_cache():
+    """Test helper: clear cached/coalesced scan state between test cases."""
+    _scan_cache.clear()
+    _scan_locks.clear()
 
 def get_hostname():
     """Return the hostname of the machine serving this app (shown in the GUI header)."""
@@ -152,7 +209,7 @@ def api_scan():
                 'error': 'No wireless interface detected on the system.'
             }), 400
             
-    raw_output, error = run_live_scan(interface)
+    raw_output, error = get_scan_result(interface)
     if error:
         return jsonify({
             'success': False, 
