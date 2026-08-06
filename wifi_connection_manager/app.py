@@ -107,6 +107,30 @@ def friendly_connect_error(raw_error: str) -> str:
     return f"Connection failed: {raw_error}"
 
 
+def _saved_psk(name: str):
+    """Look up the WPA/WPA2 pre-shared key saved for connection profile `name`, if any.
+
+    Requires root (via sudo) — NetworkManager redacts secrets for unprivileged callers
+    even with --show-secrets. Returns (password, error):
+    - (psk, None) when a saved profile with a PSK was found.
+    - (None, None) when the profile exists but has no PSK (Open network, 802.1x, etc) —
+      not an error, just nothing to reuse.
+    - (None, error) when no matching profile exists, or the lookup otherwise failed.
+    """
+    out, err = _run_nmcli(
+        ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", name],
+        timeout=NMCLI_TIMEOUT,
+    )
+    if err:
+        if re.search(r"no such property|unknown property", err, re.IGNORECASE):
+            return None, None
+        return None, err
+
+    lines = (out or "").strip().splitlines()
+    password = _split_terse(lines[0])[0] if lines else ""
+    return (password or None), None
+
+
 @app.route("/")
 def index():
     return render_template("index.html", hostname=get_hostname())
@@ -352,6 +376,25 @@ def api_connect_all():
     if only_idle:
         ifaces = [i for i in ifaces if not interface_status(i)["connected"]]
 
+    if not ifaces:
+        return jsonify({"success": True, "results": [], "connected": 0, "failed": 0})
+
+    if not password:
+        # A profile saved for this SSID (e.g. from the interface that's already
+        # connected) doesn't carry over automatically to other interfaces — nmcli
+        # binds a fresh per-device profile and needs the secret again. Reuse the
+        # saved PSK if one exists instead of failing every interface with
+        # "Incorrect password"; only ask the caller to prompt if nothing is on file.
+        saved_password, err = _saved_psk(ssid)
+        if saved_password:
+            password = saved_password
+        elif err:
+            return jsonify({
+                "success": False,
+                "needs_password": True,
+                "error": f"No saved credentials found for {ssid}.",
+            }), 200
+
     results = []
     for iface in ifaces:
         args = ["device", "wifi", "connect", ssid, "ifname", iface]
@@ -418,18 +461,10 @@ def api_reveal():
     if not name:
         return jsonify({"success": False, "error": "Connection name is required."}), 400
 
-    out, err = _run_nmcli(
-        ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", name],
-        timeout=NMCLI_TIMEOUT,
-    )
+    password, err = _saved_psk(name)
     if err:
-        if re.search(r"no such property|unknown property", err, re.IGNORECASE):
-            return jsonify({"success": True, "password": None})
         return jsonify({"success": False, "error": f"Failed to reveal password: {err}"}), 200
-
-    lines = (out or "").strip().splitlines()
-    password = _split_terse(lines[0])[0] if lines else ""
-    return jsonify({"success": True, "password": password or None})
+    return jsonify({"success": True, "password": password})
 
 
 if __name__ == "__main__":

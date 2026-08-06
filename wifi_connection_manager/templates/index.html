@@ -725,6 +725,12 @@
                 showToast(`Connected ${data.connected}, failed ${data.failed}.`, isFailure);
                 closeConnectModal();
                 refreshAll();
+            } else if (data.needs_password && !modal.classList.contains('show')) {
+                // No saved credentials on file for this SSID (the backend already tried
+                // reusing a saved profile's PSK, e.g. from an already-connected
+                // interface) — only now ask the operator to type one in.
+                const security = (selectedNetwork && selectedNetwork.ssid === ssid) ? selectedNetwork.security : 'WPA2';
+                openConnectModal(ssid, security, 'all');
             } else {
                 const message = data.error || 'Connect-all failed.';
                 if (modal.classList.contains('show')) {
@@ -893,12 +899,10 @@
             showToast('Click a network below first to choose a target for "Connect all idle".', true);
             return;
         }
-        const { ssid, security } = selectedNetwork;
-        if (security === 'Open' || savedNetworkNames.has(ssid)) {
-            connectAll(ssid, '');
-        } else {
-            openConnectModal(ssid, security, 'all');
-        }
+        // Always try first, password-less — the backend reuses a saved profile's PSK
+        // (e.g. from an already-connected interface) when one exists, and only asks us
+        // to prompt (via needs_password) when no saved credential is on file.
+        connectAll(selectedNetwork.ssid, '');
     });
     targetInterface.addEventListener('change', () => {
         userSelectedInterface = true;

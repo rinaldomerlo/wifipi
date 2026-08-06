@@ -313,6 +313,53 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertFalse(results_by_iface['wlan2']['ok'])
         self.assertEqual(results_by_iface['wlan2']['error'], "Incorrect password.")
 
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_connect_all_reuses_saved_password_when_none_supplied(self, mock_run, mock_ifaces):
+        # No password in the request, but a profile named after the SSID (e.g. saved by
+        # the interface that's already connected) has one on file — it should be reused
+        # for every idle interface rather than connecting with no credentials.
+        mock_ifaces.return_value = ["wlan0", "wlan1"]
+
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
+                return "", None
+            if args[:5] == ["-s", "-g", "802-11-wireless-security.psk", "connection", "show"]:
+                return "hunter2\n", None
+            if args[:3] == ["device", "wifi", "connect"]:
+                self.assertIn("password", args)
+                self.assertIn("hunter2", args)
+                return "", None
+            return "", None
+
+        mock_run.side_effect = side_effect
+        response = self.client.post('/api/connect-all', json={"ssid": "HomeNetwork"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['connected'], 2)
+        self.assertEqual(data['failed'], 0)
+
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_connect_all_asks_to_prompt_when_no_saved_password(self, mock_run, mock_ifaces):
+        # No password supplied and no saved profile for this SSID at all — rather than
+        # failing every interface with "Incorrect password", the frontend should be told
+        # to prompt for one.
+        mock_ifaces.return_value = ["wlan0"]
+
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
+                return "", None
+            if args[:5] == ["-s", "-g", "802-11-wireless-security.psk", "connection", "show"]:
+                return None, "unknown connection 'HomeNetwork'."
+            self.fail("should not attempt to connect without a password")
+
+        mock_run.side_effect = side_effect
+        response = self.client.post('/api/connect-all', json={"ssid": "HomeNetwork"})
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertTrue(data['needs_password'])
+
     def test_api_connect_all_requires_ssid(self):
         response = self.client.post('/api/connect-all', json={})
         self.assertEqual(response.status_code, 400)
