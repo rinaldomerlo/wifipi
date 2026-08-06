@@ -793,8 +793,8 @@ function renderTrendRail() {
         const deltaArrow = delta >= 0 ? '▲' : '▼';
         const deltaLabel = `${deltaArrow} ${delta >= 0 ? '+' : ''}${delta}/${TREND_DELTA_WINDOW_SECONDS}s`;
 
-        const rawStroke = getApColor(meta.ssid, bssid, 0.3);
-        const emaStroke = getApColor(meta.ssid, bssid, 1);
+        const rawStroke = getApColor(meta.ssid, bssid, 1);
+        const emaStroke = getApColor(meta.ssid, bssid, 0.3);
         const spark = buildSparkline(hist, emaSeries, rawStroke, emaStroke);
 
         const ssidLabel = meta.ssid || 'Hidden';
@@ -826,7 +826,7 @@ function renderTrendRail() {
     listEl.innerHTML = html;
 }
 
-// Build a two-trace inline SVG sparkline (thin translucent raw + bold EMA),
+// Build a two-trace inline SVG sparkline (bold raw + thin translucent EMA trend),
 // auto-scaled to this card's own recent min/max dBm range so small trends
 // stay visible rather than being flattened by the main chart's fixed -100/-20
 // dBm scale.
@@ -860,8 +860,8 @@ function buildSparkline(hist, emaSeries, rawStroke, emaStroke) {
 
     return `
         <svg class="trend-spark" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-            <polyline points="${rawPoints}" fill="none" stroke="${rawStroke}" stroke-width="1.4" />
-            <polyline points="${emaPoints}" fill="none" stroke="${emaStroke}" stroke-width="2.5" stroke-linecap="round" />
+            <polyline points="${emaPoints}" fill="none" stroke="${emaStroke}" stroke-width="1.4" />
+            <polyline points="${rawPoints}" fill="none" stroke="${rawStroke}" stroke-width="2.5" stroke-linecap="round" />
         </svg>
     `;
 }
