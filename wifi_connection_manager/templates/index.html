@@ -337,7 +337,10 @@
                 <button class="modal-close" id="modalClose"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <label for="pw">Network Password</label>
-            <input type="password" id="pw" placeholder="Enter passphrase" autocomplete="off">
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="password" id="pw" placeholder="Enter passphrase" autocomplete="off" style="flex: 1;">
+                <button type="button" class="btn btn-ghost" id="btnTogglePw" title="Show password"><i class="fa-solid fa-eye"></i></button>
+            </div>
             <div class="modal-error" id="modalError"></div>
             <div class="modal-hint" id="modalHint"><i class="fa-solid fa-circle-info" style="color: var(--color-blue);"></i> <span></span></div>
             <div class="modal-actions">
@@ -385,6 +388,7 @@
     const modalCancel = document.getElementById('modalCancel');
     const modalClose = document.getElementById('modalClose');
     const pwInput = document.getElementById('pw');
+    const btnTogglePw = document.getElementById('btnTogglePw');
 
     const revealModal = document.getElementById('revealModal');
     const revealTitle = document.getElementById('revealTitle');
@@ -669,6 +673,9 @@
         modalHint.textContent = `Security: ${security}`;
         modalError.classList.remove('show');
         pwInput.value = '';
+        pwInput.type = 'password';
+        btnTogglePw.innerHTML = '<i class="fa-solid fa-eye"></i>';
+        btnTogglePw.title = 'Show password';
         modal.classList.add('show');
         setTimeout(() => pwInput.focus(), 50);
 
@@ -934,6 +941,12 @@
     });
     pwInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') modalConnect.click();
+    });
+    btnTogglePw.addEventListener('click', () => {
+        const showing = pwInput.type === 'text';
+        pwInput.type = showing ? 'password' : 'text';
+        btnTogglePw.innerHTML = showing ? '<i class="fa-solid fa-eye"></i>' : '<i class="fa-solid fa-eye-slash"></i>';
+        btnTogglePw.title = showing ? 'Show password' : 'Hide password';
     });
 
     refreshAll();

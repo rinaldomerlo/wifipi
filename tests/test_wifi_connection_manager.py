@@ -36,6 +36,10 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_index_route_has_password_visibility_toggle(self):
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('btnTogglePw', html)
+
     def test_api_hostname_route(self):
         response = self.client.get('/api/hostname')
         self.assertEqual(response.status_code, 200)
