@@ -25,6 +25,11 @@ app = Flask(__name__)
 # user the manager itself runs as (root, by default -- see deploy/iperf-server-manager.service).
 IPERF3_RUN_AS_USER = "iperf3"
 
+# Absolute path, matching ExecStart= in deploy/iperf3-*.service -- avoids relying on
+# PATH resolution, which can differ between an interactive shell and this app's
+# systemd unit (or resolve to the wrong binary entirely).
+IPERF3_BIN = "/usr/bin/iperf3"
+
 
 def get_iperf3_run_as_ids():
     """
@@ -319,7 +324,7 @@ def start_server():
             "error": f"Port {port} is already in use by another process"
         }), 409
 
-    cmd = ["iperf3", "--server", "--port", str(port), "--interval", str(interval)]
+    cmd = [IPERF3_BIN, "--server", "--port", str(port), "--interval", str(interval)]
     if bind_address:
         cmd.extend(["--bind", bind_address])
     if one_off:

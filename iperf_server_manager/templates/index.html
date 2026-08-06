@@ -424,11 +424,23 @@
             background: rgba(255, 255, 255, 0.02);
         }
 
+        /* Fixed layout so the Command Line column gets whatever width the narrower,
+           content-sized columns don't need, instead of leaving it unused. */
+        .processes-table {
+            table-layout: fixed;
+        }
+
+        .processes-table th:nth-child(1), .processes-table td:nth-child(1) { width: 9%; }  /* Port */
+        .processes-table th:nth-child(2), .processes-table td:nth-child(2) { width: 9%; }  /* PID */
+        .processes-table th:nth-child(3), .processes-table td:nth-child(3) { width: 12%; } /* Uptime */
+        .processes-table th:nth-child(4), .processes-table td:nth-child(4) { width: auto; } /* Command Line */
+        .processes-table th:nth-child(5), .processes-table td:nth-child(5) { width: 13%; } /* Actions */
+
         .cmd-text {
             font-family: monospace;
             font-size: 0.8rem;
             color: var(--text-secondary);
-            max-width: 280px;
+            max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -584,19 +596,18 @@
                 <h2><i class="fa-solid fa-list-check"></i> Active iPerf3 Server Processes</h2>
             </div>
             <div class="table-responsive">
-                <table>
+                <table class="processes-table">
                     <thead>
                         <tr>
                             <th>Port</th>
                             <th>PID</th>
-                            <th>User</th>
                             <th>Uptime</th>
                             <th>Command Line</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="processes-list">
-                        <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">Loading active processes...</td></tr>
+                        <tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">Loading active processes...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -692,7 +703,7 @@
         function renderProcesses(processes) {
             const tbody = document.getElementById('processes-list');
             if (processes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No iperf3 server processes currently running.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary);">No iperf3 server processes currently running.</td></tr>';
                 return;
             }
 
@@ -701,7 +712,6 @@
                     <tr>
                         <td><span style="color: var(--color-blue); font-weight: 700; font-size: 1rem;">:${p.port}</span></td>
                         <td><code>${p.pid}</code></td>
-                        <td>${p.user}</td>
                         <td>${p.elapsed}</td>
                         <td><div class="cmd-text" title="${p.command}">${p.command}</div></td>
                         <td>
