@@ -345,6 +345,28 @@
             flex: 1;
         }
 
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 1.2rem;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .check-row input[type="checkbox"] {
+            width: auto;
+            accent-color: var(--color-blue);
+            transform: scale(1.2);
+        }
+
+        .hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.35rem;
+        }
+
         .actions {
             display: flex;
             gap: 0.75rem;
@@ -518,6 +540,12 @@
             <label for="bandwidth"><i class="fa-solid fa-gauge-high"></i> Target Bandwidth (Mbps) &mdash; leave blank for unlimited</label>
             <input id="bandwidth" type="number" placeholder="unlimited" min="1">
 
+            <label class="check-row" for="bidir">
+                <input type="checkbox" id="bidir">
+                <span><i class="fa-solid fa-arrow-right-arrow-left"></i> Bi-directional</span>
+            </label>
+            <div class="hint">Runs traffic in both directions at once (iperf3 <code>--bidir</code>) instead of just client &rarr; server.</div>
+
             <div class="actions">
                 <button id="btn-start" class="btn" onclick="startTest()"><i class="fa-solid fa-play"></i> Start Test</button>
                 <button id="btn-stop" class="btn" onclick="stopTest()" disabled><i class="fa-solid fa-stop"></i> Stop All</button>
@@ -626,6 +654,7 @@
             const duration   = parseInt(document.getElementById('duration').value) || 60;
             const iface      = document.getElementById('interface').value;
             const bandwidth  = document.getElementById('bandwidth').value.trim();
+            const bidir      = document.getElementById('bidir').checked;
 
             if (!serverIp) { setStatus('Please enter a server IP address.', 'var(--color-pink)'); return; }
 
@@ -646,7 +675,8 @@
                         server_port: serverPort,
                         duration_minutes: duration,
                         bind_interface: iface,
-                        bandwidth_mbps: bandwidth
+                        bandwidth_mbps: bandwidth,
+                        bidir: bidir
                     })
                 });
                 const data = await res.json();
@@ -700,8 +730,9 @@
                 const close = t.status === 'running'
                     ? `<span class="tab-close" title="Stop this test" onclick="event.stopPropagation(); stopOne('${t.id}')"><i class="fa-solid fa-stop"></i></span>`
                     : `<span class="tab-close" title="Remove this test" onclick="event.stopPropagation(); forgetOne('${t.id}')"><i class="fa-solid fa-xmark"></i></span>`;
+                const direction = t.bidir ? ' (bi-directional)' : '';
                 return `<button class="tab-title${active}" onclick="selectTest('${t.id}')"
-                            title="${t.server_ip}:${t.server_port} via ${t.bind_interface} — ${t.status}">
+                            title="${t.server_ip}:${t.server_port} via ${t.bind_interface}${direction} — ${t.status}">
                             <span class="tab-dot ${dot}"></span>${tabLabel(t)}${close}
                         </button>`;
             }).join('');

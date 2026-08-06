@@ -32,6 +32,7 @@ def make_test(**overrides):
         "bind_interface": "wlan0",
         "duration_minutes": 5,
         "bandwidth_mbps": "",
+        "bidir": False,
     }
     config.update(overrides)
     return gen_app_module._new_test(config)
@@ -288,6 +289,59 @@ class TestConcurrentTestRegistry(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 400)
         self.assertIn('wlan9', response.get_json()['error'])
+
+    @patch('iperf_congestion_generator.app.threading.Thread')
+    def test_start_route_passes_bidir_through(self, mock_thread):
+        response = self.client.post('/start', json={
+            "server_ip": "192.168.1.100",
+            "server_port": 5201,
+            "bidir": True,
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['test']['bidir'])
+        # args is (test, server_ip, server_port, duration_minutes, bind_interface,
+        # bandwidth_mbps, bidir) -- bidir is the last positional arg.
+        args = mock_thread.call_args[1]['args']
+        self.assertTrue(args[-1])
+
+    @patch('iperf_congestion_generator.app.threading.Thread')
+    def test_start_route_defaults_bidir_to_false(self, mock_thread):
+        response = self.client.post('/start', json={
+            "server_ip": "192.168.1.100", "server_port": 5201,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()['test']['bidir'])
+        args = mock_thread.call_args[1]['args']
+        self.assertFalse(args[-1])
+
+    @patch('iperf_congestion_generator.app.subprocess.Popen')
+    def test_run_iperf3_appends_bidir_flag_when_enabled(self, mock_popen):
+        proc = MagicMock()
+        proc.stdout = iter([])
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        test = make_test(bidir=True)
+        gen_app_module.run_iperf3(
+            test, "192.168.1.100", 5201, 1, "wlan0", "", bidir=True
+        )
+
+        cmd = mock_popen.call_args[0][0]
+        self.assertIn("--bidir", cmd)
+
+    @patch('iperf_congestion_generator.app.subprocess.Popen')
+    def test_run_iperf3_omits_bidir_flag_by_default(self, mock_popen):
+        proc = MagicMock()
+        proc.stdout = iter([])
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        test = make_test(bidir=False)
+        gen_app_module.run_iperf3(test, "192.168.1.100", 5201, 1, "wlan0", "")
+
+        cmd = mock_popen.call_args[0][0]
+        self.assertNotIn("--bidir", cmd)
 
 
 if __name__ == '__main__':

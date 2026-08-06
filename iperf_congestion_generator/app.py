@@ -177,6 +177,7 @@ def _new_test(config) -> dict:
         "bind_interface": config["bind_interface"],
         "duration_minutes": config["duration_minutes"],
         "bandwidth_mbps": config["bandwidth_mbps"],
+        "bidir": config["bidir"],
         "status": "running",
         "started_at": time.time(),
         "ended_at": None,
@@ -204,6 +205,7 @@ def test_summary(test) -> dict:
         "bind_interface": test["bind_interface"],
         "duration_minutes": test["duration_minutes"],
         "bandwidth_mbps": test["bandwidth_mbps"],
+        "bidir": test["bidir"],
         "status": test["status"],
         "started_at": test["started_at"],
         "ended_at": test["ended_at"],
@@ -235,7 +237,7 @@ def read_output(test, since: int) -> dict:
     }
 
 
-def run_iperf3(test, server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps):
+def run_iperf3(test, server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps, bidir=False):
     """Run iperf3 in a background thread, buffering output into this test's record."""
     max_duration = 86400
     total_seconds = duration_minutes * 60
@@ -265,6 +267,8 @@ def run_iperf3(test, server_ip, server_port, duration_minutes, bind_interface, b
                       "--bind-dev", bind_interface,
                       "-t", str(run_seconds),
                   ] + bandwidth_arg
+            if bidir:
+                cmd.append("--bidir")
 
             _emit(test, f"$ {' '.join(cmd)}")
 
@@ -374,6 +378,7 @@ def start():
 
     bind_interface = data.get("bind_interface") or "wlan0"
     bandwidth_mbps = str(data.get("bandwidth_mbps") or "").strip()
+    bidir = bool(data.get("bidir", False))
 
     if not server_ip or not is_valid_ip(server_ip):
         return jsonify({"error": "Invalid server IP address"}), 400
@@ -392,12 +397,13 @@ def start():
             "bind_interface": bind_interface,
             "duration_minutes": duration_minutes,
             "bandwidth_mbps": bandwidth_mbps,
+            "bidir": bidir,
         })
         summary = test_summary(test)
 
     thread = threading.Thread(
         target=run_iperf3,
-        args=(test, server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps),
+        args=(test, server_ip, server_port, duration_minutes, bind_interface, bandwidth_mbps, bidir),
         daemon=True
     )
     thread.start()
