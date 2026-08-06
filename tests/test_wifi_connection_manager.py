@@ -40,6 +40,11 @@ class TestWifiConnectionManager(unittest.TestCase):
         html = self.client.get('/').get_data(as_text=True)
         self.assertIn('btnTogglePw', html)
 
+    def test_index_route_has_connect_dialog_loading_state(self):
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('fa-spinner fa-spin', html)
+        self.assertIn('Connecting all', html)
+
     def test_api_hostname_route(self):
         response = self.client.get('/api/hostname')
         self.assertEqual(response.status_code, 200)

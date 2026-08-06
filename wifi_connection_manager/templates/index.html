@@ -931,12 +931,28 @@
     modalCancel.addEventListener('click', closeConnectModal);
     modalClose.addEventListener('click', closeConnectModal);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeConnectModal(); });
-    modalConnect.addEventListener('click', () => {
+    modalConnect.addEventListener('click', async () => {
         if (!pendingConnectSsid) return;
-        if (pendingConnectMode === 'all') {
-            connectAll(pendingConnectSsid, pwInput.value);
-        } else {
-            connect(pendingConnectSsid, pwInput.value);
+        // "Connect all idle" walks every idle interface one at a time server-side and
+        // can take a while — without this the button just sat there looking inert.
+        const originalHtml = modalConnect.innerHTML;
+        modalConnect.disabled = true;
+        modalCancel.disabled = true;
+        modalClose.disabled = true;
+        modalConnect.innerHTML = pendingConnectMode === 'all'
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Connecting all…'
+            : '<i class="fa-solid fa-spinner fa-spin"></i> Connecting…';
+        try {
+            if (pendingConnectMode === 'all') {
+                await connectAll(pendingConnectSsid, pwInput.value);
+            } else {
+                await connect(pendingConnectSsid, pwInput.value);
+            }
+        } finally {
+            modalConnect.disabled = false;
+            modalCancel.disabled = false;
+            modalClose.disabled = false;
+            modalConnect.innerHTML = originalHtml;
         }
     });
     pwInput.addEventListener('keydown', (e) => {
