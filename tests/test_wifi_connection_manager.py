@@ -259,7 +259,7 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertTrue(data['found'])
         self.assertEqual(data['password'], 'hunter2')
         mock_run.assert_called_once_with(
-            ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "HomeNetwork"],
+            ["-s", "-e", "no", "-g", "802-11-wireless-security.psk", "connection", "show", "HomeNetwork"],
             timeout=conn_app_module.NMCLI_TIMEOUT,
         )
 
@@ -443,17 +443,31 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertTrue(data['success'])
         self.assertEqual(data['password'], 'correcthorsebatterystaple')
         mock_run.assert_called_once_with(
-            ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "HomeNetwork"],
+            ["-s", "-e", "no", "-g", "802-11-wireless-security.psk", "connection", "show", "HomeNetwork"],
             timeout=conn_app_module.NMCLI_TIMEOUT,
         )
 
     @patch('wifi_connection_manager.app._run_nmcli')
-    def test_api_reveal_unescapes_colons(self, mock_run):
-        mock_run.return_value = (r"pass\:with\:colons" + "\n", None)
+    def test_api_reveal_preserves_special_characters(self, mock_run):
+        # `--escape no` asks nmcli for the raw, unescaped value directly -- a password
+        # containing ':' or '\' must come back exactly as stored, not run through our
+        # own (previously buggy) unescaping of nmcli's terse-mode escaping.
+        mock_run.return_value = ("pass:with\\backslash:and:colons\n", None)
         response = self.client.post('/api/reveal', json={"name": "HomeNetwork"})
         data = response.get_json()
         self.assertTrue(data['success'])
-        self.assertEqual(data['password'], 'pass:with:colons')
+        self.assertEqual(data['password'], 'pass:with\\backslash:and:colons')
+
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_reveal_preserves_trailing_whitespace(self, mock_run):
+        # Only the newline nmcli's own output adds should be stripped -- a password
+        # that legitimately ends in a space must be preserved, not eaten by a blanket
+        # .strip().
+        mock_run.return_value = ("trailing space \n", None)
+        response = self.client.post('/api/reveal', json={"name": "HomeNetwork"})
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['password'], 'trailing space ')
 
     @patch('wifi_connection_manager.app._run_nmcli')
     def test_api_reveal_open_network_returns_null_password(self, mock_run):

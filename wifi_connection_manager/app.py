@@ -125,14 +125,21 @@ def _saved_psk(name: str):
     """Look up the WPA/WPA2 pre-shared key saved for connection profile `name`, if any.
 
     Requires root (via sudo) — NetworkManager redacts secrets for unprivileged callers
-    even with --show-secrets. Returns (password, error):
+    even with --show-secrets. `--escape no` is deliberate: nmcli's terse-style output
+    (which `-g` also uses) backslash-escapes ':' and '\' by default, and a secret is the
+    one value we can't afford to get wrong trying to reverse that -- asking nmcli for
+    the raw, unescaped value sidesteps the whole problem. Only the trailing newline is
+    stripped, not the field generally, since a password can legitimately have leading
+    or trailing whitespace of its own.
+
+    Returns (password, error):
     - (psk, None) when a saved profile with a PSK was found.
     - (None, None) when the profile exists but has no PSK (Open network, 802.1x, etc) —
       not an error, just nothing to reuse.
     - (None, error) when no matching profile exists, or the lookup otherwise failed.
     """
     out, err = _run_nmcli(
-        ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", name],
+        ["-s", "-e", "no", "-g", "802-11-wireless-security.psk", "connection", "show", name],
         timeout=NMCLI_TIMEOUT,
     )
     if err:
@@ -140,8 +147,7 @@ def _saved_psk(name: str):
             return None, None
         return None, err
 
-    lines = (out or "").strip().splitlines()
-    password = _split_terse(lines[0])[0] if lines else ""
+    password = (out or "").rstrip("\n")
     return (password or None), None
 
 
