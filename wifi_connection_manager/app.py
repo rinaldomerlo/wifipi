@@ -93,8 +93,10 @@ def classify_band(freq_mhz):
     return "6GHz"
 
 
+MISSING_SECRETS_PATTERN = r"Secrets were required|802-11-wireless-security\.psk|key-mgmt"
+
 CONNECT_ERROR_PATTERNS = [
-    (r"Secrets were required|802-11-wireless-security\.psk|key-mgmt", "Incorrect password."),
+    (MISSING_SECRETS_PATTERN, "Incorrect password."),
     (r"No network with SSID", "Network not found — try rescanning."),
     (r"connection is not available|activation failed", "Connection attempt failed. The AP may be out of range."),
 ]
@@ -105,6 +107,24 @@ def friendly_connect_error(raw_error: str) -> str:
         if re.search(pattern, raw_error, re.IGNORECASE):
             return message
     return f"Connection failed: {raw_error}"
+
+
+def _needs_secrets(raw_error: str) -> bool:
+    """True if a failed `nmcli device wifi connect` looks like it was rejected for a
+    missing/incorrect password rather than any other reason (AP out of range, etc)."""
+    return bool(raw_error) and bool(re.search(MISSING_SECRETS_PATTERN, raw_error, re.IGNORECASE))
+
+
+def _connect_iface(ssid: str, iface: str, password: str):
+    """Run `nmcli device wifi connect <ssid> ifname <iface> [password <password>]`.
+
+    Returns (ok, error) — error is nmcli's raw stderr/stdout on failure, None on success.
+    """
+    args = ["device", "wifi", "connect", ssid, "ifname", iface]
+    if password:
+        args += ["password", password]
+    _, err = _run_nmcli(args, timeout=CONNECT_TIMEOUT)
+    return err is None, err
 
 
 def _saved_psk(name: str):
@@ -325,12 +345,25 @@ def api_connect():
     if not iface:
         return jsonify({"success": False, "error": "No wireless interface detected on the system."}), 200
 
-    args = ["device", "wifi", "connect", ssid, "ifname", iface]
-    if password:
-        args += ["password", password]
+    ok, err = _connect_iface(ssid, iface, password)
+    if not ok and not password and _needs_secrets(err):
+        # A profile saved for this SSID may be bound to a different interface (e.g. the
+        # one it's already connected on) — nmcli then creates or matches a fresh
+        # per-device profile with no secret of its own. Reuse the known-good saved PSK
+        # explicitly instead of asking the operator to re-type a password already on
+        # file; the caller (single-connect flow) only ever reaches this with an empty
+        # password when it already believed the SSID was saved.
+        saved_password, lookup_err = _saved_psk(ssid)
+        if saved_password:
+            ok, err = _connect_iface(ssid, iface, saved_password)
+        elif lookup_err:
+            return jsonify({
+                "success": False,
+                "needs_password": True,
+                "error": f"No saved credentials found for {ssid}.",
+            }), 200
 
-    out, err = _run_nmcli(args, timeout=CONNECT_TIMEOUT)
-    if err:
+    if not ok:
         return jsonify({"success": False, "error": friendly_connect_error(err)}), 200
 
     return jsonify({"success": True, "message": f"Connected to {ssid}."})
@@ -379,32 +412,30 @@ def api_connect_all():
     if not ifaces:
         return jsonify({"success": True, "results": [], "connected": 0, "failed": 0})
 
-    if not password:
-        # A profile saved for this SSID (e.g. from the interface that's already
-        # connected) doesn't carry over automatically to other interfaces — nmcli
-        # binds a fresh per-device profile and needs the secret again. Reuse the
-        # saved PSK if one exists instead of failing every interface with
-        # "Incorrect password"; only ask the caller to prompt if nothing is on file.
-        saved_password, err = _saved_psk(ssid)
-        if saved_password:
-            password = saved_password
-        elif err:
-            return jsonify({
-                "success": False,
-                "needs_password": True,
-                "error": f"No saved credentials found for {ssid}.",
-            }), 200
-
     results = []
     for iface in ifaces:
-        args = ["device", "wifi", "connect", ssid, "ifname", iface]
-        if password:
-            args += ["password", password]
-        out, err = _run_nmcli(args, timeout=CONNECT_TIMEOUT)
-        if err:
-            results.append({"interface": iface, "ok": False, "error": friendly_connect_error(err)})
-        else:
+        ok, err = _connect_iface(ssid, iface, password)
+        if not ok and not password and _needs_secrets(err):
+            # A profile saved for this SSID (e.g. from the interface that's already
+            # connected) doesn't carry over automatically — nmcli binds a fresh
+            # per-device profile and needs the secret again. Look the saved PSK up once
+            # and reuse it explicitly for this and every remaining interface instead of
+            # failing each one with "Incorrect password"; only ask the caller to prompt
+            # if nothing is on file at all.
+            saved_password, lookup_err = _saved_psk(ssid)
+            if saved_password:
+                password = saved_password
+                ok, err = _connect_iface(ssid, iface, password)
+            elif lookup_err:
+                return jsonify({
+                    "success": False,
+                    "needs_password": True,
+                    "error": f"No saved credentials found for {ssid}.",
+                }), 200
+        if ok:
             results.append({"interface": iface, "ok": True, "message": f"Connected to {ssid}."})
+        else:
+            results.append({"interface": iface, "ok": False, "error": friendly_connect_error(err)})
 
     connected = sum(1 for r in results if r["ok"])
     failed = len(results) - connected
