@@ -497,11 +497,22 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ bind_interface: iface })
                 });
-                const data = await res.json();
+                // The scan can fail in ways that never produce JSON (proxy timeout, an
+                // unhandled 500). Read the body as text first so those surface as the real
+                // status/message rather than an opaque JSON parse error.
+                const raw = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (parseErr) {
+                    setStatus(`Scan failed: HTTP ${res.status} — ${raw.slice(0, 200) || res.statusText}`, 'var(--color-pink)');
+                    return;
+                }
                 if (data.error) {
                     setStatus('Scan error: ' + data.error, 'var(--color-pink)');
                 } else if (!data.servers || data.servers.length === 0) {
-                    setStatus(`No other instances found on ${iface}.`);
+                    const where = data.subnet ? `${data.subnet} via ${data.interface}` : iface;
+                    setStatus(`No instances found: scanned ${where} for hosts with port ${data.port || 5004} open.`);
                 } else {
                     setStatus(`Found ${data.servers.length} instance(s) on ${iface}. Click one to select it (defaults to port 80).`, 'var(--color-green)');
                     const div = document.getElementById('scan-results');

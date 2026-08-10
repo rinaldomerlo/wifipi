@@ -95,8 +95,14 @@ def get_bindable_interfaces() -> list:
     return interfaces
 
 
-def scan_for_servers(bind_interface: str = "wlan0") -> list[dict]:
-    """Scan the LAN for other Pis running this app (port 5004 open), excluding local host IPs."""
+def scan_for_servers(bind_interface: str = "wlan0", meta: dict | None = None) -> list[dict]:
+    """Scan the LAN for other Pis running this app (port 5004 open), excluding local host IPs.
+
+    `meta`, if given, is filled in with the interface and subnet the scan actually used
+    (which may differ from `bind_interface` -- see the fallback below). The caller reports
+    those back to the UI so an empty result can be told apart from a scan that quietly ran
+    against the wrong subnet.
+    """
     if not shutil.which("nmap"):
         raise RuntimeError("nmap is not installed. Run: sudo apt-get install nmap")
 
@@ -151,8 +157,28 @@ def scan_for_servers(bind_interface: str = "wlan0") -> list[dict]:
     if not cidr:
         raise RuntimeError(f"No active IPv4 address found on interface {bind_interface}")
 
+    if meta is not None:
+        meta.update({"interface": bind_interface, "subnet": cidr, "port": CONTENT_PORT})
+
     cmd = ["nmap", "-e", bind_interface, "-Pn", "-p", str(CONTENT_PORT), "--open", "-n", "-T4", "-oG", "-", cidr]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"LAN scan of {cidr} on {bind_interface} timed out after 60s. "
+            "A congested link can push a /24 sweep past the limit -- retry, or set the target IP manually."
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to run nmap: {e}")
+
+    # nmap's exit status and stderr are the only clue when a scan fails outright (bad
+    # interface, no route to the subnet, permission trouble). Without this the caller
+    # just sees an empty stdout and reports "no instances found", which looks identical
+    # to a scan that genuinely found nothing.
+    if result.returncode != 0 and not result.stdout.strip():
+        raise RuntimeError(
+            result.stderr.strip() or f"nmap scan of {cidr} on {bind_interface} failed (exit {result.returncode})."
+        )
 
     found = []
     for line in result.stdout.splitlines():
@@ -300,13 +326,17 @@ def content_asset(filename):
 
 @app.route("/scan", methods=["POST"])
 def scan():
+    data = request.get_json(silent=True) or {}
+    bind_interface = data.get("bind_interface") or "wlan0"
+    meta = {}
     try:
-        data = request.get_json(silent=True) or {}
-        bind_interface = data.get("bind_interface") or "wlan0"
-        servers = scan_for_servers(bind_interface=bind_interface)
-        return jsonify({"servers": servers})
-    except RuntimeError as e:
+        servers = scan_for_servers(bind_interface=bind_interface, meta=meta)
+    except Exception as e:
+        # Catch broadly, not just RuntimeError: anything escaping here would otherwise
+        # become Flask's HTML 500 page, which the browser's res.json() can only report
+        # as an opaque parse error instead of the actual failure.
         return jsonify({"error": str(e)}), 500
+    return jsonify({"servers": servers, **meta})
 
 
 @app.route("/start", methods=["POST"])

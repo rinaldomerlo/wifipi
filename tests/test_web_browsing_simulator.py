@@ -2,6 +2,7 @@
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -235,6 +236,83 @@ class TestWebBrowsingSimulator(unittest.TestCase):
         self.assertIn('-e', nmap_call_args[0][0][0])
         self.assertIn('wlan0', nmap_call_args[0][0][0])
         self.assertIn('5004', nmap_call_args[0][0][0])
+
+    def _scan_side_effect(self, nmap_result):
+        """subprocess.run stub for scan_for_servers: real-ish `ip` output, caller's nmap result."""
+        ip_addr_stdout = "inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+        ip_addr_oneline_stdout = "2: wlan0    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
+
+        def side_effect(cmd, **kwargs):
+            if cmd[0] == "ip":
+                return MagicMock(stdout=ip_addr_oneline_stdout if "-o" in cmd else ip_addr_stdout)
+            if isinstance(nmap_result, Exception):
+                raise nmap_result
+            return nmap_result
+
+        return side_effect
+
+    @patch('web_browsing_simulator.app.shutil.which')
+    @patch('web_browsing_simulator.app.subprocess.run')
+    def test_scan_for_servers_reports_nmap_failure(self, mock_sub_run, mock_which):
+        """A failed nmap must raise with its stderr, not be mistaken for an empty result."""
+        mock_which.return_value = '/usr/bin/nmap'
+        mock_sub_run.side_effect = self._scan_side_effect(
+            MagicMock(returncode=1, stdout="", stderr="WARNING: No targets were specified\n")
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            wb_app_module.scan_for_servers(bind_interface="wlan0")
+        self.assertIn("No targets were specified", str(ctx.exception))
+
+    @patch('web_browsing_simulator.app.shutil.which')
+    @patch('web_browsing_simulator.app.subprocess.run')
+    def test_scan_for_servers_reports_timeout(self, mock_sub_run, mock_which):
+        mock_which.return_value = '/usr/bin/nmap'
+        mock_sub_run.side_effect = self._scan_side_effect(
+            subprocess.TimeoutExpired(cmd="nmap", timeout=60)
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            wb_app_module.scan_for_servers(bind_interface="wlan0")
+        self.assertIn("timed out", str(ctx.exception))
+
+    @patch('web_browsing_simulator.app.shutil.which')
+    @patch('web_browsing_simulator.app.subprocess.run')
+    def test_scan_for_servers_records_scanned_subnet(self, mock_sub_run, mock_which):
+        mock_which.return_value = '/usr/bin/nmap'
+        mock_sub_run.side_effect = self._scan_side_effect(
+            MagicMock(returncode=0, stdout="", stderr="")
+        )
+
+        meta = {}
+        self.assertEqual(wb_app_module.scan_for_servers(bind_interface="wlan0", meta=meta), [])
+        self.assertEqual(meta['interface'], 'wlan0')
+        self.assertEqual(meta['subnet'], '192.168.1.0/24')
+        self.assertEqual(meta['port'], 5004)
+
+    @patch('web_browsing_simulator.app.scan_for_servers')
+    def test_scan_route_returns_scan_context(self, mock_scan):
+        """An empty result still tells the UI what was actually scanned."""
+        def fill(bind_interface, meta=None):
+            meta.update({"interface": "eth0", "subnet": "10.0.0.0/24", "port": 5004})
+            return []
+        mock_scan.side_effect = fill
+
+        response = self.client.post('/scan', json={'bind_interface': 'wlan0'})
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['servers'], [])
+        self.assertEqual(data['subnet'], '10.0.0.0/24')
+        self.assertEqual(data['interface'], 'eth0')
+
+    @patch('web_browsing_simulator.app.scan_for_servers')
+    def test_scan_route_returns_json_for_unexpected_error(self, mock_scan):
+        """Non-RuntimeError failures must stay JSON so the browser can display them."""
+        mock_scan.side_effect = OSError("nmap vanished")
+
+        response = self.client.post('/scan', json={'bind_interface': 'wlan0'})
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("nmap vanished", response.get_json()['error'])
 
     @patch('web_browsing_simulator.app.shutil.which')
     @patch('web_browsing_simulator.app.subprocess.run')
