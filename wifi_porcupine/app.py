@@ -53,6 +53,9 @@ DWELL_AT_MIN_INTENSITY = (25.0, 45.0)  # (low, high) seconds an interface stays 
 DWELL_AT_MAX_INTENSITY = (2.0, 5.0)    # ... at intensity 10 (fast association storm)
 GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
 DWELL_BIAS_RANGE = (0.4, 1.6)          # per-interface constant speed offset; see sample_dwell()
+RETRY_BACKOFF_BASE = 2.0               # first failed connect retries within this many seconds
+RETRY_BACKOFF_CAP = 60.0               # ceiling on the retry window; see compute_retry_delay()
+RETRY_BACKOFF_MAX_DOUBLINGS = 20       # guard so a long outage can't compute 2**huge
 MIN_DWELL = 1.0                        # floor on a sampled dwell, seconds
 DWELL_TAIL_FACTOR = 3.0                # cap on a sampled dwell, as a multiple of its mean
 
@@ -214,7 +217,11 @@ def friendly(raw) -> str:
         return "unknown error"
     low = raw.lower()
     if "secrets were required" in low or "no secrets" in low or "802-1x" in low:
-        return "authentication failed (check the password)"
+        # NetworkManager asks for secrets both when the PSK is genuinely wrong and when a
+        # 4-way handshake fails for any other reason -- an AP refusing or deauthing a station
+        # under churn looks identical here. Blaming the password outright is misleading
+        # mid-run, when the same PSK has already associated dozens of times.
+        return "handshake rejected by the AP (or wrong password)"
     if "not found" in low or "no network" in low:
         return "target network not found in range"
     if "timeout" in low or "timed out" in low:
@@ -290,6 +297,32 @@ def sample_dwell(low, high, bias=1.0, rng=random):
     mean = bias * (low + high) / 2.0
     sample = rng.gammavariate(2.0, mean / 2.0)
     return max(MIN_DWELL, min(DWELL_TAIL_FACTOR * mean, sample))
+
+
+def compute_retry_delay(failures, bias=1.0, rng=random):
+    """How long to wait before retrying a failed connect, in seconds.
+
+    When an AP stops accepting -- its association table saturated by exactly the
+    churn this app generates, or it starts rate-limiting -- every interface fails
+    at once, and a fixed short retry gap makes that far worse. Each one then
+    loops on the same near-constant period (NetworkManager's association timeout
+    plus that gap), so they re-synchronize into a lockstep retry storm against an
+    AP that is already struggling. The per-interface bias that keeps the success
+    path desynchronized does not apply here, so failures batch even when normal
+    churn does not.
+
+    This is "full jitter" backoff: the window doubles per consecutive failure up
+    to RETRY_BACKOFF_CAP, and the actual wait is drawn uniformly from *zero* to
+    that window. Drawing from the whole window rather than jittering around its
+    edge is what decorrelates retries -- two interfaces failing in the same
+    instant get unrelated waits on the very first retry. The window is scaled by
+    the interface's `bias` too, so even the ceilings differ once saturated.
+
+    `failures` is the count of consecutive failures, so 1 on the first one.
+    """
+    doublings = min(max(int(failures), 1) - 1, RETRY_BACKOFF_MAX_DOUBLINGS)
+    window = min(RETRY_BACKOFF_CAP, RETRY_BACKOFF_BASE * (2 ** doublings)) * bias
+    return rng.uniform(0, window)
 
 
 # ---------------------------------------------------------------------------
@@ -369,20 +402,28 @@ def churn_worker(iface, config):
     aligned across devices upstream of us, so interfaces sharing one mean period re-synchronize
     on every such slot no matter how cycle 1 was staggered. That is exactly how the churn ends
     up looking batched.
+
+    A failed connect takes none of the above -- it never reaches the dwell -- so it backs off
+    separately via compute_retry_delay(), which is what keeps a saturated AP from collecting a
+    lockstep retry storm from every interface at once.
     """
     dwell_low, dwell_high = compute_dwell_range(config["intensity"])
     bias = random.uniform(*DWELL_BIAS_RANGE)
+    failures = 0
     _interruptible_sleep(random.uniform(0, dwell_high + GAP_RANGE[1]))
     while not stop_event.is_set():
         ok, _, err = bring_up(iface)
         if stop_event.is_set():
             break
         if not ok:
+            failures += 1
             with run_lock:
                 stats["errors"] += 1
-            _log(f"[{iface}] connect failed: {friendly(err)}")
-            _interruptible_sleep(random.uniform(*GAP_RANGE))
+            delay = compute_retry_delay(failures, bias)
+            _log(f"[{iface}] connect failed: {friendly(err)} (retry in {delay:.0f}s)")
+            _interruptible_sleep(delay)
             continue
+        failures = 0
 
         mac = read_iface_mac(iface)
         with run_lock:

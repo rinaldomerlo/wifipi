@@ -122,6 +122,55 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertAlmostEqual((lo + hi) / 2.0, 1.0)
         self.assertLess(lo, 1.0)
 
+    # -- retry backoff ----------------------------------------------------
+
+    def test_retry_delay_within_window(self):
+        for failures in range(1, 12):
+            for bias in (0.4, 1.0, 1.6):
+                cap = wp_app_module.RETRY_BACKOFF_CAP * bias
+                for _ in range(200):
+                    d = wp_app_module.compute_retry_delay(failures, bias)
+                    self.assertGreaterEqual(d, 0.0)
+                    self.assertLessEqual(d, cap)
+
+    def test_retry_delay_first_failure_is_short(self):
+        for _ in range(500):
+            d = wp_app_module.compute_retry_delay(1)
+            self.assertLessEqual(d, wp_app_module.RETRY_BACKOFF_BASE)
+
+    def test_retry_delay_grows_then_saturates(self):
+        def mean(f):
+            return sum(wp_app_module.compute_retry_delay(f) for _ in range(4000)) / 4000
+        m1, m3, m5 = mean(1), mean(3), mean(5)
+        self.assertLess(m1, m3)
+        self.assertLess(m3, m5)
+        self.assertAlmostEqual(mean(30), wp_app_module.RETRY_BACKOFF_CAP / 2,
+                               delta=wp_app_module.RETRY_BACKOFF_CAP * 0.1)
+
+    def test_retry_delay_survives_a_long_outage(self):
+        """The doubling guard keeps 2**failures from blowing up after hours of failures."""
+        d = wp_app_module.compute_retry_delay(100000)
+        self.assertLessEqual(d, wp_app_module.RETRY_BACKOFF_CAP)
+
+    def test_retry_delay_decorrelates_simultaneous_failures(self):
+        """Full jitter, not jitter-around-the-window: two interfaces failing together must
+        not land on near-identical retries, which is what caused the lockstep storm."""
+        pairs = [(wp_app_module.compute_retry_delay(4, 1.0),
+                  wp_app_module.compute_retry_delay(4, 1.0)) for _ in range(2000)]
+        window = min(wp_app_module.RETRY_BACKOFF_CAP, wp_app_module.RETRY_BACKOFF_BASE * 8)
+        close = sum(1 for a, b in pairs if abs(a - b) < window * 0.05)
+        self.assertLess(close / len(pairs), 0.15)
+
+    def test_retry_delay_treats_zero_as_first_failure(self):
+        for _ in range(200):
+            self.assertLessEqual(wp_app_module.compute_retry_delay(0),
+                                 wp_app_module.RETRY_BACKOFF_BASE)
+
+    def test_friendly_secrets_error_does_not_just_blame_the_password(self):
+        msg = wp_app_module.friendly("Secrets were required, but not provided")
+        self.assertIn("AP", msg)
+        self.assertIn("password", msg)
+
     # -- naming / profile args -------------------------------------------
 
     def test_profile_name(self):
