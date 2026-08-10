@@ -57,7 +57,16 @@ MIN_DWELL = 1.0                        # floor on a sampled dwell, seconds
 DWELL_TAIL_FACTOR = 3.0                # cap on a sampled dwell, as a multiple of its mean
 
 NMCLI_TIMEOUT = 15
-CONNECT_TIMEOUT = 30
+# Must not undercut nmcli's own default wait for `connection up` (90s). Killing nmcli does
+# NOT cancel the activation NetworkManager is already running, so a shorter timeout here just
+# produces a bogus "connect failed", an inflated error count, and an immediate second
+# activation request stacked on the first -- visible in the journal as a stream of
+# "disconnecting for new activation request" while the device is still in `config`.
+# DHCP alone can hold an activation for 45s, so 30s was well inside the range that misfires.
+CONNECT_TIMEOUT = 90
+# Deliberately shorter: teardown is quick, and this one bounds how long a stop request waits
+# on a wedged interface. It has no reason to inherit the connect timeout.
+DISCONNECT_TIMEOUT = 30
 MAX_OUTPUT_LINES = 2000
 
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -328,7 +337,7 @@ def bring_up(iface):
 
 
 def bring_down(iface):
-    return _nmcli(["connection", "down", profile_name(iface)], timeout=CONNECT_TIMEOUT)
+    return _nmcli(["connection", "down", profile_name(iface)], timeout=DISCONNECT_TIMEOUT)
 
 
 def read_iface_mac(iface):
