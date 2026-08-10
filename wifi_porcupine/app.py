@@ -49,9 +49,13 @@ PROFILE_PREFIX = "porcupine"   # NetworkManager connection profiles: porcupine-<
 # --- Intensity model (templated into the UI so the slider bounds can't drift) ---
 INTENSITY_RANGE = (1, 10)
 DEFAULT_INTENSITY = 5
-DWELL_AT_MIN_INTENSITY = (25.0, 45.0)  # (low, high) seconds an interface stays associated at intensity 1
-DWELL_AT_MAX_INTENSITY = (2.0, 5.0)    # ... at intensity 10 (fast association storm)
+DWELL_AT_MIN_INTENSITY = (120.0, 240.0)  # (low, high) seconds associated at intensity 1 (slow: a reconnect every few minutes)
+DWELL_AT_MAX_INTENSITY = (2.0, 5.0)      # ... at intensity 10 (fast association storm)
 GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
+# Rough fixed cost of a reconnect that intensity can't shrink: scan + DHCP, measured ~20s on a
+# 5-interface Pi run. Only used to make the UI's reconnects/min estimate honest -- without it the
+# estimate ignores the dominant term and badly overstates the achievable rate at high intensity.
+OFFLINE_ESTIMATE_SECONDS = 20.0
 DWELL_BIAS_RANGE = (0.4, 1.6)          # per-interface constant speed offset; see sample_dwell()
 RETRY_BACKOFF_BASE = 2.0               # first failed connect retries within this many seconds
 RETRY_BACKOFF_CAP = 60.0               # ceiling on the retry window; see compute_retry_delay()
@@ -255,10 +259,17 @@ def _intensity_fraction(intensity) -> float:
 
 
 def compute_dwell_range(intensity):
-    """(low, high) association dwell seconds for a given intensity; shrinks as intensity rises."""
+    """(low, high) association dwell seconds for a given intensity; shrinks as intensity rises.
+
+    The interpolation is geometric (each step multiplies the dwell by a constant ratio), not
+    linear. Perceived churn rate is roughly 1/dwell, so a linear dwell ramp bunches all the
+    perceptible change at the top of the slider and leaves the low half nearly flat -- which is
+    what made the old slider feel "too subtle". Geometric spacing gives every step about the
+    same proportional effect on the rate, so slow settings are as adjustable as fast ones.
+    """
     t = _intensity_fraction(intensity)
-    low = DWELL_AT_MIN_INTENSITY[0] + (DWELL_AT_MAX_INTENSITY[0] - DWELL_AT_MIN_INTENSITY[0]) * t
-    high = DWELL_AT_MIN_INTENSITY[1] + (DWELL_AT_MAX_INTENSITY[1] - DWELL_AT_MIN_INTENSITY[1]) * t
+    low = DWELL_AT_MIN_INTENSITY[0] * (DWELL_AT_MAX_INTENSITY[0] / DWELL_AT_MIN_INTENSITY[0]) ** t
+    high = DWELL_AT_MIN_INTENSITY[1] * (DWELL_AT_MAX_INTENSITY[1] / DWELL_AT_MIN_INTENSITY[1]) ** t
     return (low, high)
 
 
@@ -638,6 +649,7 @@ def index():
         dwell_min=DWELL_AT_MIN_INTENSITY,
         dwell_max=DWELL_AT_MAX_INTENSITY,
         gap_range=GAP_RANGE,
+        offline_estimate=OFFLINE_ESTIMATE_SECONDS,
     )
 
 

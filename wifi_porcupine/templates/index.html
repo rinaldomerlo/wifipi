@@ -614,14 +614,18 @@
         const DWELL_MIN = [{{ dwell_min[0] }}, {{ dwell_min[1] }}];
         const DWELL_MAX = [{{ dwell_max[0] }}, {{ dwell_max[1] }}];
         const GAP_RANGE = [{{ gap_range[0] }}, {{ gap_range[1] }}];
+        const OFFLINE_ESTIMATE = {{ offline_estimate }};
 
         function estimatedReconnectsPerMinute(intensity) {
+            // Geometric, mirroring compute_dwell_range() in app.py (see its docstring).
             const t = (intensity - INTENSITY_MIN) / (INTENSITY_MAX - INTENSITY_MIN);
-            const dwellLow = DWELL_MIN[0] + (DWELL_MAX[0] - DWELL_MIN[0]) * t;
-            const dwellHigh = DWELL_MIN[1] + (DWELL_MAX[1] - DWELL_MIN[1]) * t;
+            const dwellLow = DWELL_MIN[0] * Math.pow(DWELL_MAX[0] / DWELL_MIN[0], t);
+            const dwellHigh = DWELL_MIN[1] * Math.pow(DWELL_MAX[1] / DWELL_MIN[1], t);
             const dwellAvg = (dwellLow + dwellHigh) / 2;
             const gapAvg = (GAP_RANGE[0] + GAP_RANGE[1]) / 2;
-            return 60 / (dwellAvg + gapAvg);
+            // Include the fixed scan+DHCP cost; at high intensity it dominates the cycle, so
+            // leaving it out (as the old estimate did) overstates the achievable rate several-fold.
+            return 60 / (dwellAvg + gapAvg + OFFLINE_ESTIMATE);
         }
 
         function setStatus(msg, color) {

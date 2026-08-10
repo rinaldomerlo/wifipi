@@ -78,14 +78,39 @@ class TestWifiPorcupine(unittest.TestCase):
     # -- intensity math --------------------------------------------------
 
     def test_compute_dwell_range_endpoints(self):
-        self.assertEqual(wp_app_module.compute_dwell_range(1), (25.0, 45.0))
-        self.assertEqual(wp_app_module.compute_dwell_range(10), (2.0, 5.0))
+        self.assertEqual(wp_app_module.compute_dwell_range(1),
+                         wp_app_module.DWELL_AT_MIN_INTENSITY)
+        self.assertEqual(wp_app_module.compute_dwell_range(10),
+                         wp_app_module.DWELL_AT_MAX_INTENSITY)
 
     def test_compute_dwell_range_monotonic(self):
         low1, high1 = wp_app_module.compute_dwell_range(2)
         low2, high2 = wp_app_module.compute_dwell_range(8)
         self.assertLess(low2, low1)
         self.assertLess(high2, high1)
+
+    def test_compute_dwell_range_slow_end_is_actually_slow(self):
+        """Intensity 1 must offer a genuinely slow churn -- minutes, not ~1/min."""
+        low, high = wp_app_module.compute_dwell_range(1)
+        self.assertGreaterEqual(low, 60.0)
+
+    def test_compute_dwell_range_is_geometric(self):
+        """Each step multiplies the dwell by a constant ratio, so the midpoint is the
+        geometric mean of the endpoints, not the arithmetic mean of a linear ramp."""
+        lo1, hi1 = wp_app_module.compute_dwell_range(1)
+        lo10, hi10 = wp_app_module.compute_dwell_range(10)
+        # intensity where t = 0.5
+        mid = (wp_app_module.INTENSITY_RANGE[0] + wp_app_module.INTENSITY_RANGE[1]) / 2
+        loM, hiM = wp_app_module.compute_dwell_range(mid)
+        self.assertAlmostEqual(loM, (lo1 * lo10) ** 0.5, places=4)
+        self.assertAlmostEqual(hiM, (hi1 * hi10) ** 0.5, places=4)
+
+    def test_intensity_steps_have_even_proportional_effect(self):
+        """The cure for "too subtle": no single slider step changes the dwell far more than
+        another. Under the old linear ramp the 9->10 step dwarfed the 1->2 step."""
+        means = [sum(wp_app_module.compute_dwell_range(i)) / 2 for i in range(1, 11)]
+        ratios = [means[i] / means[i + 1] for i in range(len(means) - 1)]
+        self.assertLess(max(ratios) / min(ratios), 1.05)
 
     def test_sample_dwell_respects_clamps(self):
         low, high = wp_app_module.compute_dwell_range(5)
