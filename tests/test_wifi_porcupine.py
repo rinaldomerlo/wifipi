@@ -87,6 +87,41 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertLess(low2, low1)
         self.assertLess(high2, high1)
 
+    def test_sample_dwell_respects_clamps(self):
+        low, high = wp_app_module.compute_dwell_range(5)
+        for bias in (wp_app_module.DWELL_BIAS_RANGE[0], 1.0, wp_app_module.DWELL_BIAS_RANGE[1]):
+            cap = wp_app_module.DWELL_TAIL_FACTOR * bias * (low + high) / 2.0
+            for _ in range(2000):
+                d = wp_app_module.sample_dwell(low, high, bias)
+                self.assertGreaterEqual(d, wp_app_module.MIN_DWELL)
+                self.assertLessEqual(d, cap)
+
+    def test_sample_dwell_preserves_mean(self):
+        """The UI's reconnects/min estimate assumes mean dwell == (low + high) / 2."""
+        low, high = wp_app_module.compute_dwell_range(5)
+        samples = [wp_app_module.sample_dwell(low, high) for _ in range(20000)]
+        expected = (low + high) / 2.0
+        self.assertAlmostEqual(sum(samples) / len(samples), expected, delta=expected * 0.1)
+
+    def test_sample_dwell_is_wider_than_the_uniform_band(self):
+        """A flat [low, high] band re-locks after a shared stall; the tail is what breaks batches."""
+        low, high = wp_app_module.compute_dwell_range(5)
+        samples = [wp_app_module.sample_dwell(low, high) for _ in range(5000)]
+        self.assertLess(min(samples), low)
+        self.assertGreater(max(samples), high)
+
+    def test_sample_dwell_bias_scales_the_mean(self):
+        low, high = wp_app_module.compute_dwell_range(5)
+        slow = [wp_app_module.sample_dwell(low, high, 1.4) for _ in range(20000)]
+        fast = [wp_app_module.sample_dwell(low, high, 0.6) for _ in range(20000)]
+        self.assertGreater(sum(slow) / len(slow), sum(fast) / len(fast))
+
+    def test_dwell_bias_range_is_symmetric_about_one(self):
+        """Biases must average to 1.0 or the slider's rate estimate drifts."""
+        lo, hi = wp_app_module.DWELL_BIAS_RANGE
+        self.assertAlmostEqual((lo + hi) / 2.0, 1.0)
+        self.assertLess(lo, 1.0)
+
     # -- naming / profile args -------------------------------------------
 
     def test_profile_name(self):

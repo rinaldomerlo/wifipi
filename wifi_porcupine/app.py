@@ -9,8 +9,10 @@ ARP tables far more than plain reconnect churn -- each interface is a
 "spine" repeatedly poking the hub, hence "porcupine".
 
 Every ticked interface churns at once, independently and out of sync with the
-others (a random initial jitter plus per-cycle random dwell/gap keep them from
-ever lining up) -- concurrency is just however many you select. A single
+others (a random initial jitter, a constant per-interface speed bias, and a
+long-tailed per-cycle dwell keep them from lining up even when NetworkManager
+stalls and releases them together) -- concurrency is just however many you
+select. A single
 intensity slider controls speed: how long each interface dwells associated
 before disconnecting and reconnecting.
 
@@ -50,6 +52,9 @@ DEFAULT_INTENSITY = 5
 DWELL_AT_MIN_INTENSITY = (25.0, 45.0)  # (low, high) seconds an interface stays associated at intensity 1
 DWELL_AT_MAX_INTENSITY = (2.0, 5.0)    # ... at intensity 10 (fast association storm)
 GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
+DWELL_BIAS_RANGE = (0.4, 1.6)          # per-interface constant speed offset; see sample_dwell()
+MIN_DWELL = 1.0                        # floor on a sampled dwell, seconds
+DWELL_TAIL_FACTOR = 3.0                # cap on a sampled dwell, as a multiple of its mean
 
 NMCLI_TIMEOUT = 15
 CONNECT_TIMEOUT = 30
@@ -241,6 +246,43 @@ def compute_dwell_range(intensity):
     return (low, high)
 
 
+def sample_dwell(low, high, bias=1.0, rng=random):
+    """Draw one association dwell time, in seconds, for a single churn cycle.
+
+    Drawing uniformly from [low, high] is not enough to keep interfaces apart in
+    practice. Reconnecting means scanning first, and something upstream (NM or
+    wpa_supplicant) aligns *scan starts* across devices: in a NetworkManager
+    journal from this app, each scan reliably took ~6.2s on its own device, yet
+    pairs of devices that had gone disconnected 0.2s apart began scanning at the
+    same instant to 20ms. That shared slot re-phases interfaces every cycle, and
+    interfaces that also share one mean period just re-lock after each collapse,
+    which is what makes the log read as batches.
+
+    `bias` is what breaks that: a constant per-interface speed offset drawn once
+    per run, so no two interfaces share a mean period and they drift across the
+    slot boundary instead of marching back into step. Simulating five interfaces
+    against that quantizer, the share of associations landing alone rather than
+    in a clump rises from ~14% at a common period to ~24% across the width of
+    DWELL_BIAS_RANGE (at a 20s slot; the gain holds at every slot size tried),
+    which is why that range is deliberately wide.
+
+    The gamma tail (shape 2) rather than a flat band does *not* help the batching
+    -- once `bias` is in play the same simulation puts it a fraction of a percent
+    behind a plain uniform draw, consistently. It earns its place on the other
+    half of the complaint: a single interface pacing a narrow uniform band looks
+    metronomic in the log, and this makes its own timing read as genuinely random.
+    If you are tempted to simplify, drop the tail, not the bias.
+
+    The mean is preserved at `bias * (low + high) / 2`, and `bias` is symmetric
+    about 1.0, so the reconnect-rate estimate under the intensity slider stays
+    honest. Clamped to [MIN_DWELL, DWELL_TAIL_FACTOR * mean] so the tail can't
+    strand an interface associated for minutes.
+    """
+    mean = bias * (low + high) / 2.0
+    sample = rng.gammavariate(2.0, mean / 2.0)
+    return max(MIN_DWELL, min(DWELL_TAIL_FACTOR * mean, sample))
+
+
 # ---------------------------------------------------------------------------
 # nmcli profiles (one per interface, each with a random cloned MAC)
 # ---------------------------------------------------------------------------
@@ -305,12 +347,23 @@ def churn_worker(iface, config):
     """One interface's association/MAC churn loop: connect (new MAC) -> dwell -> disconnect -> gap.
 
     Interfaces are started together in start_run(), so without a stagger they'd all connect in
-    lockstep on cycle 1; the random per-cycle dwell/gap would only desync them afterwards. The
-    initial jitter spreads first connects across a full dwell window so churn looks random from
-    the start rather than synchronized.
+    lockstep on cycle 1. Three things keep them apart, and all three are needed:
+
+    * an initial jitter spread across a full cycle, so cycle 1 is already staggered;
+    * a per-run `bias` giving this interface its own mean period (see sample_dwell()), so it
+      drifts relative to its neighbours rather than sharing their rhythm -- this is the one
+      that does the real work;
+    * a long-tailed per-cycle dwell, which keeps one interface's own timing from looking
+      metronomic (it does not help the batching -- see sample_dwell()).
+
+    The stagger alone is not enough, because reconnecting requires a scan and scan starts are
+    aligned across devices upstream of us, so interfaces sharing one mean period re-synchronize
+    on every such slot no matter how cycle 1 was staggered. That is exactly how the churn ends
+    up looking batched.
     """
     dwell_low, dwell_high = compute_dwell_range(config["intensity"])
-    _interruptible_sleep(random.uniform(0, dwell_high))
+    bias = random.uniform(*DWELL_BIAS_RANGE)
+    _interruptible_sleep(random.uniform(0, dwell_high + GAP_RANGE[1]))
     while not stop_event.is_set():
         ok, _, err = bring_up(iface)
         if stop_event.is_set():
@@ -329,7 +382,7 @@ def churn_worker(iface, config):
             stats["active_interfaces"] = len(run_state["connected"])
         _log(f"[{iface}] associated as {mac or 'unknown MAC'} -> {config['ssid']}")
 
-        _interruptible_sleep(random.uniform(dwell_low, dwell_high))
+        _interruptible_sleep(sample_dwell(dwell_low, dwell_high, bias))
 
         bring_down(iface)
         with run_lock:
