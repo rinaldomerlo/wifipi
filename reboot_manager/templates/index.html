@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /reboot to /reboot/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reboot Manager - WiFiPi</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(255, 59, 116, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 760px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-pink), var(--color-orange));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(255, 59, 116, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-pink);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i {
+            color: var(--color-blue);
+        }
+
+        .host-badge strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.1rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.5rem;
+        }
+
+        .card-header-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .card-header-title h2 {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: var(--text-primary);
+        }
+
+        .card-header-title h2 i {
+            color: var(--color-pink);
+        }
+
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat-box {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--color-blue);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            width: fit-content;
+        }
+
+        .badge-active {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--color-green);
+            border: 1px solid rgba(0, 230, 118, 0.3);
+        }
+
+        .badge-inactive {
+            background: rgba(255, 59, 116, 0.15);
+            color: var(--color-pink);
+            border: 1px solid rgba(255, 59, 116, 0.3);
+        }
+
+        .warn-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin: 1.25rem 0;
+        }
+
+        .warn-text strong {
+            color: var(--text-primary);
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.8rem 1.4rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-red {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(255, 59, 116, 0.2);
+        }
+
+        .btn-red:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(255, 59, 116, 0.35);
+        }
+
+        .btn-ghost {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+        }
+
+        .btn-ghost:hover:not(:disabled) {
+            border-color: var(--glass-border-hover);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        /* Countdown confirmation bar, shown in place of the reboot button */
+        #confirm-bar {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            background: rgba(255, 59, 116, 0.08);
+            border: 1px solid rgba(255, 59, 116, 0.35);
+            border-radius: 14px;
+            padding: 1rem 1.25rem;
+        }
+
+        #confirm-bar.show {
+            display: flex;
+        }
+
+        #confirm-bar .confirm-msg {
+            font-size: 0.9rem;
+            color: var(--text-primary);
+        }
+
+        #confirm-bar .confirm-msg strong {
+            color: var(--color-pink);
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+        }
+
+        /* Full-panel result state after a reboot has been triggered */
+        #result-panel {
+            display: none;
+            text-align: center;
+            padding: 1.5rem 1rem;
+        }
+
+        #result-panel.show {
+            display: block;
+        }
+
+        #result-panel i {
+            font-size: 2rem;
+            color: var(--color-orange);
+            margin-bottom: 0.75rem;
+        }
+
+        #result-panel.online i {
+            color: var(--color-green);
+        }
+
+        #result-panel p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 0.4rem;
+        }
+
+        #action-area.hidden, .stats-summary.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-power-off logo-icon"></i>
+                <div class="logo-text">
+                    <h1>REBOOT<span> Manager</span></h1>
+                    <span class="subtitle">System Power Control</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <!-- Status -->
+        <div class="stats-summary" id="stats-summary">
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-clock-rotate-left"></i> Uptime</span>
+                <span id="stat-uptime" class="stat-value">&mdash;</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-desktop"></i> Platform</span>
+                <span id="stat-platform" class="stat-value" style="font-size: 1.1rem;">&mdash;</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label"><i class="fa-solid fa-shield-halved"></i> Reboot Capability</span>
+                <span id="stat-capability" class="badge badge-inactive">Checking&hellip;</span>
+            </div>
+        </div>
+
+        <!-- Reboot Action -->
+        <div class="glass-card">
+            <div class="card-header-title">
+                <h2><i class="fa-solid fa-power-off"></i> Reboot This Host</h2>
+            </div>
+
+            <div id="action-area">
+                <p class="warn-text">
+                    This restarts <strong>{{ hostname }}</strong> immediately. Every WiFiPi tool running on
+                    this host — including this page — will be unreachable for roughly a minute while it
+                    comes back up. Any in-progress test runs are lost.
+                </p>
+
+                <button id="reboot-btn" class="btn btn-red" onclick="startCountdown()">
+                    <i class="fa-solid fa-power-off"></i> Reboot Pi
+                </button>
+
+                <div id="confirm-bar">
+                    <span class="confirm-msg">Rebooting in <strong id="countdown-num">5</strong>s&hellip;</span>
+                    <button class="btn btn-ghost" onclick="cancelCountdown()">
+                        <i class="fa-solid fa-xmark"></i> Cancel
+                    </button>
+                </div>
+
+                <p id="status-msg" class="warn-text" style="display: none;"></p>
+            </div>
+
+            <div id="result-panel">
+                <i class="fa-solid fa-rotate fa-spin" id="result-icon"></i>
+                <div id="result-title" style="font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700;">
+                    Reboot initiated
+                </div>
+                <p id="result-detail">Waiting for {{ hostname }} to come back online&hellip;</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CONFIRM_TOKEN = 'REBOOT';
+        const COUNTDOWN_SECONDS = 5;
+        let countdownTimer = null;
+        let countdownRemaining = COUNTDOWN_SECONDS;
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('api/status');
+                const data = await res.json();
+
+                document.getElementById('stat-uptime').textContent = data.uptime_text || 'unknown';
+                document.getElementById('stat-platform').textContent = data.platform || 'unknown';
+
+                const cap = document.getElementById('stat-capability');
+                if (data.can_reboot) {
+                    cap.textContent = 'Available';
+                    cap.className = 'badge badge-active';
+                    document.getElementById('reboot-btn').disabled = false;
+                } else {
+                    cap.textContent = 'Unavailable';
+                    cap.className = 'badge badge-inactive';
+                    document.getElementById('reboot-btn').disabled = true;
+                    if (data.reason) {
+                        const msg = document.getElementById('status-msg');
+                        msg.style.display = 'block';
+                        msg.textContent = 'Reboot is unavailable on this host: ' + data.reason + '.';
+                    }
+                }
+            } catch (e) {
+                document.getElementById('stat-uptime').textContent = 'unknown';
+            }
+        }
+
+        function startCountdown() {
+            countdownRemaining = COUNTDOWN_SECONDS;
+            document.getElementById('countdown-num').textContent = countdownRemaining;
+            document.getElementById('reboot-btn').style.display = 'none';
+            document.getElementById('confirm-bar').classList.add('show');
+
+            countdownTimer = setInterval(() => {
+                countdownRemaining -= 1;
+                if (countdownRemaining <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    triggerReboot();
+                    return;
+                }
+                document.getElementById('countdown-num').textContent = countdownRemaining;
+            }, 1000);
+        }
+
+        function cancelCountdown() {
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+            document.getElementById('confirm-bar').classList.remove('show');
+            document.getElementById('reboot-btn').style.display = 'inline-flex';
+        }
+
+        async function triggerReboot() {
+            document.getElementById('confirm-bar').classList.remove('show');
+
+            try {
+                const res = await fetch('api/reboot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: CONFIRM_TOKEN })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showResultPanel();
+                    pollForReturn();
+                } else {
+                    const msg = document.getElementById('status-msg');
+                    msg.style.display = 'block';
+                    msg.textContent = data.error || 'Reboot request failed.';
+                    document.getElementById('reboot-btn').style.display = 'inline-flex';
+                }
+            } catch (e) {
+                // A fetch error here can just as easily mean the host already went down --
+                // treat it the same as a successful trigger and start watching for it to return.
+                showResultPanel();
+                pollForReturn();
+            }
+        }
+
+        function showResultPanel() {
+            document.getElementById('action-area').classList.add('hidden');
+            document.getElementById('result-panel').classList.add('show');
+        }
+
+        function pollForReturn() {
+            const check = async () => {
+                try {
+                    const res = await fetch('api/hostname', { cache: 'no-store' });
+                    if (res.ok) {
+                        const panel = document.getElementById('result-panel');
+                        panel.classList.add('online');
+                        document.getElementById('result-icon').className = 'fa-solid fa-circle-check';
+                        document.getElementById('result-title').textContent = 'Back online';
+                        document.getElementById('result-detail').innerHTML =
+                            'This host has come back up. <a href="javascript:location.reload()" style="color: var(--color-blue);">Reload the page</a>.';
+                        return;
+                    }
+                } catch (e) {
+                    // still down -- keep polling
+                }
+                setTimeout(check, 4000);
+            };
+            // Give the host a moment to actually go down before probing, so the very
+            // first check doesn't just catch it still up and declare victory early.
+            setTimeout(check, 8000);
+        }
+
+        fetchStatus();
+        setInterval(fetchStatus, 15000);
+    </script>
+</body>
+</html>
