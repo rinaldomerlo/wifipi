@@ -149,6 +149,47 @@
             background-color: #7dd3fc;
         }
 
+        /* External links — a compact row of pill buttons, deliberately lighter-weight
+           than .app-card and outside the JS discovery gate below (which hides
+           .app-card until a matching /api/hostname probe succeeds). These aren't
+           WiFiPi apps and have nothing to probe, so they should always be visible. */
+        .external-links {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-top: 2rem;
+        }
+
+        .external-links-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            margin-right: 0.15rem;
+        }
+
+        .link-pill {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            text-decoration: none;
+            transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .link-pill:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-color);
+            background-color: #24334d;
+        }
+
         footer {
             color: var(--text-secondary);
             font-size: 0.8rem;
@@ -234,7 +275,7 @@
             <span class="host-badge" title="Host serving this page">
                 Host: <strong id="hostName"><!--# echo var="hostname" default="" --></strong>
             </span>
-            <span class="version-badge" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-26-g47edfb4<!--/VERSION--></span>
+            <span class="version-badge" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-27-gb3bf1d8<!--/VERSION--></span>
         </header>
 
         <div class="section-label">Monitoring &amp; Management</div>
@@ -316,6 +357,19 @@
                     Open App &rarr;
                 </div>
             </a>
+
+            <a href="/reboot/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">Reboot Manager <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/reboot/</span>
+                    </div>
+                    <p class="card-desc">Check uptime and trigger a confirmed reboot of this host, with a cancellable countdown before it fires.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
         </div>
 
         <hr class="section-divider">
@@ -377,6 +431,13 @@
 
         <div id="empty-state">
             No WiFiPi tools appear to be running on this host yet.
+        </div>
+
+        <div class="external-links">
+            <span class="external-links-label">Useful Links</span>
+            <a href="https://librespeed.org/" class="link-pill" target="_blank" rel="noopener noreferrer">LibreSpeed</a>
+            <a href="https://www.samknows.com/realspeed/" class="link-pill" target="_blank" rel="noopener noreferrer">SamKnows RealSpeed</a>
+            <a href="https://www.speedtest.net/" class="link-pill" target="_blank" rel="noopener noreferrer">Speedtest.net</a>
         </div>
 
         <footer>

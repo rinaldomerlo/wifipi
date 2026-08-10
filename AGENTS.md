@@ -330,6 +330,34 @@ Project Root Structure:
   as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a no-op
   under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.
 
+### K. Reboot Manager (`reboot_manager`)
+- **Purpose**: The one app whose entire job is to take the host down. Shows uptime and platform, and
+  reboots this Pi (`sudo systemctl reboot`, falling back to `sudo reboot` if `systemctl` isn't on PATH)
+  from a single confirmed action.
+- **Confirmation is layered, not single-point**: the browser UI swaps the reboot button for an inline,
+  cancellable 5-second countdown bar rather than firing immediately or using a blocking native `confirm()`
+  (which the other apps use for less consequential actions like killing one iperf3 PID). The countdown
+  auto-POSTs `/api/reboot` with `{"confirm": "REBOOT"}` when it reaches zero unless cancelled. The API
+  independently rejects any request missing that exact token, so a stray or scripted POST — bypassing the
+  UI entirely — can't take the host down by accident.
+- **The reboot itself runs from a background thread** (`_do_reboot`), started after the route returns
+  `202`, with a short (`REBOOT_DELAY_SECONDS`) sleep before the actual command runs. This exists solely so
+  the HTTP response has time to flush to the client before the process — and the whole host — goes down;
+  without it, the client can be left hanging on a connection that never completes.
+- **`reboot_state["pending"]`**, guarded by `reboot_lock`, rejects a second `/api/reboot` call (`409`)
+  while one is already in flight. Gunicorn is configured `--workers 1` for this app specifically so that
+  in-process guard actually holds across every request, the same reasoning as the WiFi Monitor's
+  single-worker scan lock.
+- **After a successful trigger**, the page hides the action card and polls `GET /api/hostname` every 4s
+  (after an initial 8s grace period so it doesn't catch the host still up and declare victory early) until
+  it answers again, then reports "back online" with a reload link — useful feedback since the browser tab
+  itself goes dark for the duration.
+- **System Privilege Requirement**: needs only `systemctl` (or `reboot`) on PATH. The unit runs as **root**
+  by default like `client_simulator` and `wifi_porcupine`, so **no new sudoers entry** is required
+  (commands still go via `sudo`, a no-op under root). Refuses up front off-Linux or without a reboot
+  mechanism on PATH, returning a clear JSON error — critical here specifically, since the alternative on a
+  macOS dev machine would be either a crash or, worse, actually rebooting the developer's laptop.
+
 ---
 
 ## 3. UI/UX Design Standards
@@ -370,6 +398,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Web Terminal wrapper: bound to `0.0.0.0:5008` (1 worker, multi-threaded; runs as `User=pi`, needs no privileges).
    - `ttyd` backend: bound to `127.0.0.1:5009` only, never the LAN (also `User=pi`; not a Gunicorn app — a standalone daemon installed to `/usr/local/bin/ttyd`).
    - WiFi Porcupine worker: bound to `0.0.0.0:5010` (1 worker, multi-threaded; runs as root by default since it needs `nmcli`/`ip`/`iptables`/`sysctl`).
+   - Reboot Manager worker: bound to `0.0.0.0:5011` (1 worker, multi-threaded — must stay a single process so its in-process reboot-pending guard holds across requests; runs as root by default since it needs `systemctl reboot`/`reboot`).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
    - `iperf-generator.service`
@@ -382,6 +411,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - `web-terminal.service`
    - `ttyd.service`
    - `wifi-porcupine.service`
+   - `reboot-manager.service`
 3. **Reverse Proxy**: **Nginx** (`deploy/nginx.conf.example`) — the site config is app-independent: it
    serves the landing page and `include`s per-app snippets glob-matched from `/etc/nginx/wifipi.d/*.conf`.
    Each app's proxy block is its own snippet, `deploy/nginx.d/<app>.conf`, installed per Pi to match
@@ -401,6 +431,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/terminal/`): Proxies to the Web Terminal wrapper (`127.0.0.1:5008`).
    - Port `80` (Subpath `/terminal/tty/`): Proxies to `ttyd` (`127.0.0.1:5009`) with WebSocket upgrade headers, requiring the `$connection_upgrade` map installed to `/etc/nginx/conf.d/`.
    - Port `80` (Subpath `/porcupine/`): Proxies to WiFi Porcupine (`127.0.0.1:5010`). Plain proxy — output is polled from a ring buffer, no SSE.
+   - Port `80` (Subpath `/reboot/`): Proxies to Reboot Manager (`127.0.0.1:5011`). Plain proxy — status is polled, no SSE.
 
 ---
 

@@ -26,7 +26,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as a non-root user. Requires a one-off manual install of `ttyd` (see below).
 10. **WiFi Porcupine (`wifi_porcupine`)**  
    A browser-based tool that stresses an access point by rapidly and randomly associating and disassociating several physical WiFi interfaces (the Pi's built-in radio plus USB adapters) against one target SSID, optionally randomizing each interface's MAC on every reconnect (via NetworkManager's `cloned-mac-address`, a per-run toggle) so the hub sees a constant stream of brand-new stations — bloating its association, DHCP-lease and ARP tables. A single intensity slider controls churn speed (dwell time) only — concurrency is simply however many interfaces you tick, all churning at once and independently randomized so they never move in lockstep. A built-in scan lets you pick the target SSID from nearby networks instead of typing it, auto-filling the password too if this Pi already has that network saved elsewhere. Refuses gracefully off-Linux or without NetworkManager (e.g. macOS development).
-11. **Default Landing Webpage (`www`)**  
+11. **Reboot Manager (`reboot_manager`)**  
+   A browser-based tool that shows this Pi's uptime and reboots it (`systemctl reboot`) behind a cancellable countdown, with the API itself requiring an explicit confirmation token as a second safeguard against an accidental trigger. Runs as root by default, like Client Simulator and WiFi Porcupine, so it needs no sudoers entry. Refuses gracefully off-Linux or without a reboot mechanism on PATH (e.g. macOS development).
+12. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
 
 ---
@@ -135,6 +137,7 @@ those cards.
 | WiFi Roaming Monitor | `roaming-monitor` | `roaming.conf` |
 | Web Terminal | `web-terminal` + `ttyd` | `terminal.conf` (+ WebSocket map) |
 | WiFi Porcupine | `wifi-porcupine` | `porcupine.conf` |
+| Reboot Manager | `reboot-manager` | `reboot.conf` |
 
 Copy the units you want. For example, a **monitor Pi**:
 
@@ -222,6 +225,12 @@ realistic browsing traffic, there's no reason to pay the Python/WSGI overhead fo
 Nginx worker user (commonly `www-data`) needs read access to `/opt/wifipi/web_browsing_simulator/content/`,
 same as it already needs for `/opt/wifipi/www`.
 
+There is no separate "content server" role to set up: every Pi running `web_browsing_simulator` is both a
+driver and a target, so pointing one instance at another's IP just means installing this app normally
+(Steps 3-5 below) on that other Pi too. Its synthetic page corpus (`content/`) is generated automatically
+on process start — random page/asset sizes and counts, regenerated fresh on every restart — so there is no
+content to author or copy over by hand.
+
 1. Copy the Nginx configuration template from `deploy/nginx.conf.example` to `/etc/nginx/sites-available/wifipi`, and create the directory the per-app snippets get installed into:
    ```bash
    sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/wifipi
@@ -285,3 +294,4 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)
 - **Web Terminal**: Open `http://<pi-ip>/terminal/` (Subpath `/terminal/` reverse-proxied to Gunicorn on port 5008, with `/terminal/tty/` reverse-proxied to the loopback-bound `ttyd` on port 5009)
 - **WiFi Porcupine**: Open `http://<pi-ip>/porcupine/` (Subpath `/porcupine/` reverse-proxied to Gunicorn on port 5010)
+- **Reboot Manager**: Open `http://<pi-ip>/reboot/` (Subpath `/reboot/` reverse-proxied to Gunicorn on port 5011)

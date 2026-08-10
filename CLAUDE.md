@@ -21,6 +21,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `roaming_monitor/` | Flask app — live association-event timeline from `iw event`, with roam timing and decoded 802.11 reason codes. Port 5007, proxied at `/roaming/`. |
 | `web_terminal/` | Flask app — thin wrapper framing a `ttyd` browser shell. Port 5008, proxied at `/terminal/`; `ttyd` itself listens on loopback:5009. |
 | `wifi_porcupine/` | Flask app — stresses an AP by churning association/MAC across several physical WiFi interfaces (random MAC per reconnect via `nmcli`), intensity controlled by a single slider. Port 5010, proxied at `/porcupine/`. |
+| `reboot_manager/` | Flask app — shows uptime and reboots this host (`systemctl reboot`, root) behind a cancellable countdown. Port 5011, proxied at `/reboot/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -47,6 +48,7 @@ cd network_device_scanner && ../.venv/bin/python app.py          # :5006
 cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
 cd web_terminal && ../.venv/bin/python app.py                    # :5008
 cd wifi_porcupine && ../.venv/bin/python app.py                  # :5010
+cd reboot_manager && ../.venv/bin/python app.py                  # :5011
 ```
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
@@ -116,6 +118,15 @@ independently randomized (a startup jitter plus per-cycle random dwell/gap) so t
 It requires NetworkManager as the active backend, same caveat as `wifi_connection_manager`, and refuses up
 front off-Linux / without `nmcli`+`iw` so macOS dev gets a clear JSON error. It also runs a best-effort
 orphan sweep on startup (leftover `porcupine-*` NetworkManager profiles) so a hard restart is idempotent.
+
+`reboot_manager` reboots the host (`sudo systemctl reboot`, falling back to `sudo reboot`). Its systemd
+unit runs as **root** by default, same as `client_simulator` and `wifi_porcupine`, so no new sudoers entry
+is needed and the "four apps need passwordless sudo" count above is unchanged. `/api/reboot` requires an
+explicit `{"confirm": "REBOOT"}` body — defense in depth against a stray or scripted POST, on top of the
+browser UI's own cancellable countdown — and fires the actual reboot from a short-lived background thread
+after a brief delay so the HTTP response has time to flush before the host goes down. Refuses up front
+off-Linux / without `systemctl` or `reboot` on PATH so macOS dev gets a clear JSON error instead of a
+crash or, worse, actually rebooting the dev machine.
 
 ---
 
