@@ -275,7 +275,7 @@
             <span class="host-badge" title="Host serving this page">
                 Host: <strong id="hostName"><!--# echo var="hostname" default="" --></strong>
             </span>
-            <span class="version-badge" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-37-g3ad4c74<!--/VERSION--></span>
+            <span class="version-badge" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-38-g3b1e70d<!--/VERSION--></span>
         </header>
 
         <div class="section-label">Monitoring &amp; Management</div>
@@ -396,6 +396,19 @@
                         <span class="path-badge">/webbrowse/</span>
                     </div>
                     <p class="card-desc">Simulate realistic, bursty web-browsing traffic against another Pi's randomized page corpus, instead of iperf3's sustained throughput.</p>
+                </div>
+                <div class="btn-open">
+                    Open App &rarr;
+                </div>
+            </a>
+
+            <a href="/videostream/" class="app-card">
+                <div>
+                    <div class="card-header">
+                        <h2 class="card-title">Video Stream Simulator <span class="beta-badge">Beta</span></h2>
+                        <span class="path-badge">/videostream/</span>
+                    </div>
+                    <p class="card-desc">Stream an adaptive-bitrate HLS ladder from another Pi with several buffering viewers at once, reporting the metrics video actually cares about: startup delay, rebuffers and the rendition the link could sustain.</p>
                 </div>
                 <div class="btn-open">
                     Open App &rarr;

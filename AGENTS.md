@@ -19,6 +19,7 @@ Project Root Structure:
 - `iperf_server_manager/` — Web interface to view, start, stop, restart, and monitor `iperf3` server daemons and systemd services.
 - `wifi_connection_manager/` — Web interface to scan, connect, disconnect, and manage saved WiFi networks via NetworkManager (`nmcli`).
 - `web_browsing_simulator/` — Simulates realistic, bursty web-browsing traffic against another Pi's randomized synthetic page corpus, as a complement to `iperf_congestion_generator`'s sustained-throughput streams.
+- `video_stream_simulator/` — Simulates adaptive-bitrate video playback against another Pi's generated HLS ladder, reporting video QoE metrics (startup delay, rebuffers, sustained rendition) rather than raw throughput.
 - `client_simulator/` — Simulates many independent clients behind a single WiFi association using isolated Linux network namespaces NAT'd out one radio, with a churn engine cycling client identities.
 - `network_device_scanner/` — ARP-based LAN device inventory (IP/MAC/vendor/hostname) via a privileged `nmap -sn` sweep of a chosen Bind Interface's subnet.
 - `roaming_monitor/` — Live association-event timeline from `iw event`, timing roams between BSSIDs and decoding 802.11 reason codes.
@@ -338,7 +339,59 @@ Project Root Structure:
   as **root** by default, so **no new sudoers entry** is required (commands still go via `sudo`, a no-op
   under root). Requires NetworkManager as the active backend, same as `wifi_connection_manager`.
 
-### K. Reboot Manager (`reboot_manager`)
+### K. Video Stream Simulator (`video_stream_simulator`)
+- **Purpose**: Simulates adaptive-bitrate video playback between two Pis. Where `web_browsing_simulator`
+  models bursty page loads and `iperf_congestion_generator` models a saturating stream, this models the
+  third shape real WiFi carries: a paced, buffer-driven fetch that adapts its own bitrate. The output is
+  video QoE — startup delay, rebuffer count/duration, rendition switches, sustained rendition — not Mbps.
+- **Content model (`media_gen.py`)**: Generates a real HLS ABR ladder to disk on first start — a master
+  playlist plus one media playlist and segment set per rung (240p/400k, 360p/800k, 480p/1400k,
+  720p/2800k, 1080p/5000k), 4-second segments, 12 segments (48s) per rung, ~62 MB total. The playlists
+  are genuine HLS; the segment *bytes* are `os.urandom` sized exactly as a real encode at that bitrate
+  would be (`nominal_segment_bytes`), jittered ±15% to mimic VBR so the client's bandwidth estimate
+  isn't unrealistically easy. Undecodable bytes are deliberate: this exercises the link, not a decoder,
+  and it makes the bitrate exact rather than whatever an encoder happened to emit.
+  Set `VIDEOSTREAM_USE_FFMPEG=1` for a real H.264 encode of ffmpeg's `testsrc2` instead (opt-in; many
+  minutes of full-load CPU on a Pi, and identical network behaviour) — only worth it to point a real
+  player at the corpus. If ffmpeg is present but unusable it falls back to synthetic bytes per rendition
+  rather than leaving the app with no corpus.
+  Unlike the browsing corpus this is **not** regenerated per process start (`ensure_media_ladder`): a
+  stable corpus is what makes two runs against the same target comparable.
+  `VIDEOSTREAM_CONTENT_DIR` relocates it (the test suite points it at a temp dir; in production it can
+  move the corpus off the SD card).
+- **Serving path**: Nginx aliases `/videostream/content/` straight to the generated directory. This
+  matters more than the equivalent in `web_browsing_simulator`: several concurrent 1080p viewers would
+  saturate Flask's worker threads long before the WiFi link, measuring the wrong thing. `app.py` also
+  serves the files at `/content/...` so `python app.py` alone works in dev. The unit runs
+  `--threads 16` (not the usual 4) because each viewer holds a segment request open for its download.
+- **Client (viewer loop)**: Parses the target's real playlists (master → media → segments) rather than a
+  convenience manifest, so it issues the same request chain a real player does. Each viewer keeps a
+  media buffer, fetches only while below `BUFFER_TARGET_S` (24s, jittered ±15% per viewer so viewers
+  don't pause and resume in lockstep) and idles otherwise — **this idling is what makes it a stream
+  rather than a download**. Playback starts once `STARTUP_BUFFER_S` (4s) has landed; a **stall** is
+  simply the buffer reaching zero before the refilling fetch returns (`_drain`). The VOD corpus loops,
+  so the duration slider controls run length, not the 48s of media.
+- **ABR (`select_rendition`)**: EWMA of per-segment throughput, times an `ABR_SAFETY_FACTOR` of 0.8 (a
+  rung sized exactly at the estimate stalls the moment the link dips). Steps **up** one rung at a time so
+  a single fast segment can't fling the session to 1080p and back; drops are unrestricted, since a
+  collapsed link needs the player out of the way immediately. A failed segment drops a rung and continues
+  rather than tearing the viewer down — that's a real streaming event, not a fatal error. ABR can be
+  disabled to pin every viewer to one rung ("can this link carry N streams at 1080p?").
+- **Metrics**: `GET /metrics` returns per-viewer live state plus the aggregate the UI's stat tiles poll
+  once a second. Polled rather than pushed down the SSE stream because these are *current values*, not
+  events — a page reattaching mid-run must see real state immediately, not wait for the next segment.
+  The aggregate falls back to finished viewers once none are live, so the averages describe the run that
+  ran instead of collapsing to zero at the end.
+- **Concurrency**: "Intensity" is the number of independent viewers (1-10), each with its own buffer,
+  bandwidth estimate, ladder position and a 0-2s startup jitter so they don't all request in the same
+  millisecond (which would distort the startup-delay numbers).
+- **System Privilege Requirement**: None — only shells out to `nmap` for the optional LAN scan, same as
+  `web_browsing_simulator`. LAN scan probes port 5012; actual streaming defaults to port 80 through the
+  target's Nginx.
+- **Bind Interface detection**: same `get_bindable_interfaces()`/`GET /interfaces` pattern as
+  `iperf_congestion_generator` — see section B.
+
+### L. Reboot Manager (`reboot_manager`)
 - **Purpose**: The one app whose entire job is to take the host down. Shows uptime and platform, and
   reboots this Pi (`sudo systemctl reboot`, falling back to `sudo reboot` if `systemctl` isn't on PATH)
   from a single confirmed action.
@@ -406,6 +459,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Web Terminal wrapper: bound to `0.0.0.0:5008` (1 worker, multi-threaded; runs as `User=pi`, needs no privileges).
    - `ttyd` backend: bound to `127.0.0.1:5009` only, never the LAN (also `User=pi`; not a Gunicorn app — a standalone daemon installed to `/usr/local/bin/ttyd`).
    - WiFi Porcupine worker: bound to `0.0.0.0:5010` (1 worker, multi-threaded; runs as root by default since it needs `nmcli`/`ip`/`iptables`/`sysctl`).
+   - Video Stream Simulator worker: bound to `0.0.0.0:5012` (1 worker, multi-threaded for SSE streaming; `--threads 16` rather than the usual 4, since each simulated viewer holds a segment request open for the whole download and the default would cap concurrency below the 10-viewer maximum the UI offers).
    - Reboot Manager worker: bound to `0.0.0.0:5011` (1 worker, multi-threaded — must stay a single process so its in-process reboot-pending guard holds across requests; runs as root by default since it needs `systemctl reboot`/`reboot`).
 2. **Process Management**: **systemd** services located in `deploy/`:
    - `wifi-monitor.service`
@@ -439,6 +493,7 @@ Production deployments avoid Flask development debug mode (`python3 app.py`) in 
    - Port `80` (Subpath `/terminal/`): Proxies to the Web Terminal wrapper (`127.0.0.1:5008`).
    - Port `80` (Subpath `/terminal/tty/`): Proxies to `ttyd` (`127.0.0.1:5009`) with WebSocket upgrade headers, requiring the `$connection_upgrade` map installed to `/etc/nginx/conf.d/`.
    - Port `80` (Subpath `/porcupine/`): Proxies to WiFi Porcupine (`127.0.0.1:5010`). Plain proxy — output is polled from a ring buffer, no SSE.
+   - Port `80` (Subpath `/videostream/`): Proxies to Video Stream Simulator (`127.0.0.1:5012`) with buffering disabled for SSE, except `/videostream/content/` which is served directly by Nginx via `alias` (bypassing Python) from `/opt/wifipi/video_stream_simulator/content/` — not merely an optimization here, since several concurrent 1080p viewers would saturate Flask's worker threads before the WiFi link.
    - Port `80` (Subpath `/reboot/`): Proxies to Reboot Manager (`127.0.0.1:5011`). Plain proxy — status is polled, no SSE.
 
 ---

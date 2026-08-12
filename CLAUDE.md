@@ -22,6 +22,7 @@ day-to-day working rules. `README.md` holds the end-user install/deploy instruct
 | `web_terminal/` | Flask app — thin wrapper framing a `ttyd` browser shell. Port 5008, proxied at `/terminal/`; `ttyd` itself listens on loopback:5009. |
 | `wifi_porcupine/` | Flask app — stresses an AP by churning association/MAC across several physical WiFi interfaces (random MAC per reconnect via `nmcli`), intensity controlled by a single slider. Port 5010, proxied at `/porcupine/`. |
 | `reboot_manager/` | Flask app — shows uptime and reboots this host (`systemctl reboot`, root) behind a cancellable countdown. Port 5011, proxied at `/reboot/`. |
+| `video_stream_simulator/` | Flask app — simulates adaptive-bitrate video playback against another Pi's generated HLS ladder, reporting video QoE (startup delay, rebuffers, sustained rendition). Port 5012, proxied at `/videostream/`. |
 | `www/index.html` | Static landing page served at `/`. No backend. |
 | `deploy/` | systemd unit files and `nginx.conf.example`. |
 | `tests/` | `unittest` suite, one module per app. |
@@ -49,7 +50,12 @@ cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
 cd web_terminal && ../.venv/bin/python app.py                    # :5008
 cd wifi_porcupine && ../.venv/bin/python app.py                  # :5010
 cd reboot_manager && ../.venv/bin/python app.py                  # :5011
+cd video_stream_simulator && ../.venv/bin/python app.py          # :5012
 ```
+
+`video_stream_simulator` generates a ~62 MB HLS ladder into its `content/` (gitignored) on first start.
+Set `VIDEOSTREAM_CONTENT_DIR` to relocate it — the test suite points it at a temp dir so importing the
+app doesn't write a corpus into the working tree.
 
 Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
 `/opt/wifipi/.venv` in production. Do not add third-party packages without asking.
@@ -126,6 +132,21 @@ sync if you touch the model.
 It requires NetworkManager as the active backend, same caveat as `wifi_connection_manager`, and refuses up
 front off-Linux / without `nmcli`+`iw` so macOS dev gets a clear JSON error. It also runs a best-effort
 orphan sweep on startup (leftover `porcupine-*` NetworkManager profiles) so a hard restart is idempotent.
+
+`video_stream_simulator` needs no privileges beyond the optional `nmap` LAN scan (same as
+`web_browsing_simulator`), and works fine on macOS in dev. It generates a real HLS ABR ladder to disk
+(`media_gen.py`) whose segment *bytes* are `os.urandom` sized exactly as a real encode at that bitrate
+would be — undecodable on purpose, since this exercises the link rather than a decoder, and it makes the
+bitrate exact instead of whatever an encoder emitted. `VIDEOSTREAM_USE_FFMPEG=1` swaps in a real H.264
+encode of `testsrc2`; it's opt-in because it costs many minutes of full-load Pi CPU for identical network
+behaviour. The corpus is **not** regenerated per start (unlike the browsing corpus) — a stable ladder is
+what makes two runs comparable. The client parses the real playlists rather than a convenience manifest,
+and the thing that makes it a *stream* rather than a download is that each viewer idles once its buffer
+hits `BUFFER_TARGET_S`; a stall is the buffer reaching zero before the refilling fetch returns. If you
+touch `select_rendition()` (0.8 safety factor, one-rung-at-a-time up, unrestricted down) keep the
+docstring's rationale intact — each of those three rules exists to prevent a specific artifact. Its nginx
+snippet's `/videostream/content/` alias is load-bearing, not an optimization: several concurrent 1080p
+viewers saturate Flask's worker threads long before the WiFi link, which would measure the wrong thing.
 
 `reboot_manager` reboots the host (`sudo systemctl reboot`, falling back to `sudo reboot`). Its systemd
 unit runs as **root** by default, same as `client_simulator` and `wifi_porcupine`, so no new sudoers entry

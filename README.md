@@ -26,7 +26,9 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as a non-root user. Requires a one-off manual install of `ttyd` (see below).
 10. **WiFi Porcupine (`wifi_porcupine`)**  
    A browser-based tool that stresses an access point by rapidly and randomly associating and disassociating several physical WiFi interfaces (the Pi's built-in radio plus USB adapters) against one target SSID, optionally randomizing each interface's MAC on every reconnect (via NetworkManager's `cloned-mac-address`, a per-run toggle) so the hub sees a constant stream of brand-new stations — bloating its association, DHCP-lease and ARP tables. Three sliders shape the churn: **Presence** (what fraction of the time each interface stays connected — its duty cycle), **Churn rate** (reconnects per minute), and **Variability** (how bursty vs. metronomic the timing is). A low Presence + slow rate models a quiet household device that is disconnected most of the time; a high rate is a full association storm. Concurrency is simply however many interfaces you tick, all churning at once and independently randomized so they never move in lockstep. A built-in scan lets you pick the target SSID from nearby networks instead of typing it, auto-filling the password too if this Pi already has that network saved elsewhere. Refuses gracefully off-Linux or without NetworkManager (e.g. macOS development).
-11. **Reboot Manager (`reboot_manager`)**  
+11. **Video Stream Simulator (`video_stream_simulator`)**  
+   A browser-based tool that simulates adaptive-bitrate video streaming against another Pi, complementing the Web Browsing Simulator's bursty page loads. Every instance generates and serves a real HLS ABR ladder (240p/400 kbps up to 1080p/5 Mbps, ~62 MB) whose segments are synthetic bytes sized exactly as a real encode at that bitrate would be — so the link, not a video decoder, is what gets exercised. Each simulated viewer keeps a playback buffer, fetches segments only while that buffer is below target and then idles, producing the on/off sawtooth a real player generates rather than a flat-out download; it also runs its own ABR logic, estimating throughput from recent segments and switching rendition to match. The result is reported as the metrics video actually cares about — startup delay, rebuffer count and stall time, rendition switches, and the bitrate the link could sustain — rather than raw Mbps. ABR can be turned off to pin every viewer to one rung, which is how you ask "can this link really carry N streams at 1080p?"
+12. **Reboot Manager (`reboot_manager`)**  
    A browser-based tool that shows this Pi's uptime and reboots it (`systemctl reboot`) behind a cancellable countdown, with the API itself requiring an explicit confirmation token as a second safeguard against an accidental trigger. Runs as root by default, like Client Simulator and WiFi Porcupine, so it needs no sudoers entry. Refuses gracefully off-Linux or without a reboot mechanism on PATH (e.g. macOS development).
 12. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
@@ -132,6 +134,7 @@ those cards.
 | iPerf3 Server Manager | `iperf-server-manager` | `iperfserver.conf` |
 | WiFi Connection Manager | `wifi-connection-manager` | `wificonnect.conf` |
 | Web Browsing Simulator | `web-browsing-simulator` | `webbrowse.conf` |
+| Video Stream Simulator | `video-stream-simulator` | `videostream.conf` |
 | Client Simulator | `client-simulator` | `clientsim.conf` |
 | Network Device Scanner | `network-device-scanner` | `devices.conf` |
 | WiFi Roaming Monitor | `roaming-monitor` | `roaming.conf` |
@@ -225,6 +228,12 @@ realistic browsing traffic, there's no reason to pay the Python/WSGI overhead fo
 Nginx worker user (commonly `www-data`) needs read access to `/opt/wifipi/web_browsing_simulator/content/`,
 same as it already needs for `/opt/wifipi/www`.
 
+`videostream.conf` does the same for the Video Stream Simulator's generated HLS ladder
+(`/videostream/content/` → `/opt/wifipi/video_stream_simulator/content/`), and there it matters more than
+convenience: several concurrent 1080p viewers pulling 4-second segments will saturate Flask's worker
+threads long before they saturate the WiFi link, which would measure the wrong thing entirely. Same read
+access requirement for the Nginx worker user.
+
 There is no separate "content server" role to set up: every Pi running `web_browsing_simulator` is both a
 driver and a target, so pointing one instance at another's IP just means installing this app normally
 (Steps 3-5 below) on that other Pi too. Its synthetic page corpus (`content/`) is generated automatically
@@ -294,4 +303,5 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)
 - **Web Terminal**: Open `http://<pi-ip>/terminal/` (Subpath `/terminal/` reverse-proxied to Gunicorn on port 5008, with `/terminal/tty/` reverse-proxied to the loopback-bound `ttyd` on port 5009)
 - **WiFi Porcupine**: Open `http://<pi-ip>/porcupine/` (Subpath `/porcupine/` reverse-proxied to Gunicorn on port 5010)
+- **Video Stream Simulator**: Open `http://<pi-ip>/videostream/` (Subpath `/videostream/` reverse-proxied to Gunicorn on port 5012, with `/videostream/content/` served directly by Nginx)
 - **Reboot Manager**: Open `http://<pi-ip>/reboot/` (Subpath `/reboot/` reverse-proxied to Gunicorn on port 5011)

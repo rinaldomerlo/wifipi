@@ -225,3 +225,6 @@ web_browsing_simulator/content/
 # downloaded into the repo (README points downloads at $HOME/Downloads instead)
 ttyd.aarch64
 ttyd.*
+
+# Video Stream Simulator's generated HLS ladder (~62 MB, generated on first app start)
+video_stream_simulator/content/

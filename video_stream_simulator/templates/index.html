@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // Subpath URL normalization: redirect /videostream to /videostream/ for proper relative asset resolution
+        if (window.location.pathname.length > 1 && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+            window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Stream Simulator</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #08090f;
+            --bg-light: #16192a;
+            --glass-bg: rgba(22, 27, 49, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.06);
+            --glass-border-hover: rgba(255, 255, 255, 0.12);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8e95a5;
+            --text-muted: #575e6d;
+            --color-pink: #ff3b74;
+            --color-blue: #00d2ff;
+            --color-purple: #ab47bc;
+            --color-green: #00e676;
+            --color-orange: #ff9100;
+            --font-main: 'Outfit', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-glow: 0 0 15px rgba(0, 210, 255, 0.25);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            font-family: var(--font-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+            padding: 1.5rem;
+        }
+
+        .glass-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at 10% 20%, rgba(171, 71, 188, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(0, 210, 255, 0.08) 0%, transparent 40%),
+                        linear-gradient(145deg, #07080d 0%, #111424 100%);
+            z-index: -1;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 10px rgba(0, 210, 255, 0.3));
+        }
+
+        .logo-text h1 {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            line-height: 1.1;
+        }
+
+        .logo-text h1 span {
+            color: var(--color-blue);
+            font-weight: 400;
+        }
+
+        .logo-text .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Hostname badge — identifies which machine is serving this GUI */
+        .host-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-family: var(--font-heading);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            background: rgba(8, 9, 15, 0.4);
+            border: 1px solid var(--glass-border);
+            padding: 0.4rem 0.85rem;
+            border-radius: 50px;
+            white-space: nowrap;
+        }
+
+        .host-badge i {
+            color: var(--color-blue);
+        }
+
+        .host-badge strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.25s ease;
+        }
+
+        .nav-btn:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: var(--color-blue);
+            color: #fff;
+            transform: translateY(-2px);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            padding: 1.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border-color: var(--glass-border-hover);
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+            margin-top: 1.2rem;
+        }
+
+        label:first-of-type {
+            margin-top: 0;
+        }
+
+        label i {
+            margin-right: 4px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(8, 9, 15, 0.6);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            font-size: 0.95rem;
+            font-weight: 500;
+            outline: none;
+            transition: all 0.25s ease;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--color-blue);
+            box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
+        }
+
+        select option {
+            background-color: var(--bg-light);
+            color: var(--text-primary);
+        }
+
+        input[type="range"] {
+            flex: 1;
+            width: auto;
+            padding: 0;
+            accent-color: var(--color-blue);
+            background: transparent;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+            accent-color: var(--color-blue);
+            cursor: pointer;
+        }
+
+        .row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .row input {
+            flex: 1;
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 0.5rem;
+        }
+
+        .toggle-row label {
+            margin: 0;
+            text-transform: none;
+            letter-spacing: 0;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            border: none;
+            outline: none;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.7rem 1.4rem;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        #btn-scan {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        #btn-scan:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--glass-border-hover);
+        }
+
+        #btn-start {
+            background: linear-gradient(135deg, #00e676 0%, #00c853 100%);
+            color: #08090f;
+            box-shadow: 0 4px 15px rgba(0, 230, 118, 0.25);
+        }
+
+        #btn-start:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 230, 118, 0.4);
+        }
+
+        #btn-stop {
+            background: linear-gradient(135deg, var(--color-pink) 0%, #d81b60 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(255, 59, 116, 0.25);
+        }
+
+        #btn-stop:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 59, 116, 0.4);
+        }
+
+        #status-msg {
+            font-size: 0.85rem;
+            color: var(--color-orange);
+            margin-top: 0.75rem;
+            min-height: 1.2em;
+            font-weight: 500;
+        }
+
+        #output {
+            background: rgba(8, 9, 15, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            height: 360px;
+            overflow-y: auto;
+            color: var(--color-green);
+        }
+
+        #scan-results {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        #scan-results button {
+            background: rgba(0, 210, 255, 0.1);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            color: var(--color-blue);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #scan-results button:hover {
+            background: rgba(0, 210, 255, 0.2);
+            border-color: var(--color-blue);
+        }
+
+        /* QoE stat tiles — the numbers that actually describe a video session */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat-tile {
+            background: rgba(8, 9, 15, 0.5);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 1rem 1.15rem;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .stat-value {
+            font-family: var(--font-heading);
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-top: 0.3rem;
+            line-height: 1.1;
+        }
+
+        .stat-value small {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-left: 0.15rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        th {
+            text-align: left;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            padding: 0.5rem 0.6rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 0.55rem 0.6rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-variant-numeric: tabular-nums;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 0.15rem 0.55rem;
+            border-radius: 50px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-family: var(--font-heading);
+        }
+
+        .pill-playing { background: rgba(0, 230, 118, 0.15); color: var(--color-green); }
+        .pill-buffering { background: rgba(255, 145, 0, 0.15); color: var(--color-orange); }
+        .pill-starting { background: rgba(255, 255, 255, 0.07); color: var(--text-secondary); }
+        .pill-finished { background: rgba(0, 210, 255, 0.12); color: var(--color-blue); }
+        .pill-error { background: rgba(255, 59, 116, 0.15); color: var(--color-pink); }
+
+        .ladder-note {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.6rem;
+            line-height: 1.5;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(8, 9, 15, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-film logo-icon"></i>
+                <div class="logo-text">
+                    <h1>Video Stream <span>Simulator</span></h1>
+                    <span class="subtitle">Adaptive Bitrate Playback Load</span>
+                </div>
+                <span class="host-badge" title="Hostname of the machine serving this page">
+                    <i class="fa-solid fa-microchip"></i> <strong>{{ hostname }}</strong>
+                </span>
+            </div>
+            <div class="nav-links">
+                <a href="/" class="nav-btn"><i class="fa-solid fa-house"></i> Home</a>
+            </div>
+        </header>
+
+        <div class="glass-card">
+            <div class="row" style="align-items: flex-end; flex-wrap: wrap;">
+                <div style="flex: 2; min-width: 180px;">
+                    <label for="target-ip" style="margin-top: 0;"><i class="fa-solid fa-server"></i> Target IP Address</label>
+                    <input id="target-ip" type="text" placeholder="e.g. 192.168.1.100">
+                </div>
+                <div style="flex: 1; min-width: 100px; max-width: 140px;">
+                    <label for="target-port" style="margin-top: 0;"><i class="fa-solid fa-network-wired"></i> Port</label>
+                    <input id="target-port" type="number" min="1" max="65535" placeholder="80" value="80">
+                </div>
+                <div style="margin-bottom: 2px;">
+                    <button id="btn-scan" class="btn" onclick="scanLAN()" title="Scan LAN for other Pis running this app (port 5012)"><i class="fa-solid fa-radar"></i> Scan LAN</button>
+                </div>
+            </div>
+            <div id="scan-results"></div>
+            <div class="ladder-note">
+                Port 80 streams through the target's nginx, which serves segments as static files — use it for anything
+                above a viewer or two. Port 5012 hits the target's Flask dev server directly, where Python becomes the
+                bottleneck before the WiFi link does.
+            </div>
+
+            <div class="row" style="align-items: flex-end; flex-wrap: wrap; gap: 1rem;">
+                <div style="flex: 1; min-width: 140px;">
+                    <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
+                    <input id="duration" type="number" value="10" min="1">
+                </div>
+                <div style="flex: 1; min-width: 140px;">
+                    <label for="rendition"><i class="fa-solid fa-layer-group"></i> Fixed Rendition</label>
+                    <select id="rendition" disabled>
+                        {% for r in renditions %}
+                        <option value="{{ r.name }}" {% if loop.last %}selected{% endif %}>{{ r.name }} — {{ r.bitrate_kbps }} kbps</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="toggle-row">
+                <input id="abr" type="checkbox" checked onchange="updateAbrToggle()">
+                <label for="abr">Adaptive bitrate (ABR) — let each viewer pick its rendition from measured throughput</label>
+            </div>
+            <div class="ladder-note">
+                With ABR on, viewers start at the bottom rung and climb as the link allows, so a degraded link shows up as
+                a lower average rendition instead of a stall. Turn it off to pin every viewer to one rung — the way to ask
+                "can this link actually carry N streams at 1080p?"
+            </div>
+
+            <label for="intensity"><i class="fa-solid fa-users"></i> Concurrent Viewers</label>
+            <div class="row" style="gap: 1rem;">
+                <input id="intensity" type="range" min="1" max="10" value="2" oninput="updateIntensityLabel()">
+                <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 6.5em;">2 viewers</span>
+            </div>
+            <div class="ladder-note" id="demand-note"></div>
+
+            <label for="interface"><i class="fa-solid fa-ethernet"></i> Bind Interface (for LAN scan)</label>
+            <select id="interface">
+                <option value="wlan0">wlan0</option>
+                <option value="eth0">eth0</option>
+            </select>
+
+            <div class="actions">
+                <button id="btn-start" class="btn" onclick="startTest()"><i class="fa-solid fa-play"></i> Start Streaming</button>
+                <button id="btn-stop" class="btn" onclick="stopTest()" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+            </div>
+            <div id="status-msg"></div>
+        </div>
+
+        <div class="glass-card">
+            <label style="margin-top: 0; margin-bottom: 0.9rem;"><i class="fa-solid fa-chart-simple"></i> Playback Quality</label>
+            <div class="stat-grid">
+                <div class="stat-tile">
+                    <div class="stat-label">Avg Rendition</div>
+                    <div class="stat-value" id="stat-bitrate" style="color: var(--color-blue);">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Rebuffers</div>
+                    <div class="stat-value" id="stat-stalls" style="color: var(--color-orange);">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Stall Time</div>
+                    <div class="stat-value" id="stat-stall-time" style="color: var(--color-pink);">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Avg Startup</div>
+                    <div class="stat-value" id="stat-startup" style="color: var(--color-purple);">—</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Delivered</div>
+                    <div class="stat-value" id="stat-total" style="color: var(--color-green);">—</div>
+                </div>
+            </div>
+
+            <table style="margin-top: 1.25rem;">
+                <thead>
+                    <tr>
+                        <th>Viewer</th>
+                        <th>State</th>
+                        <th>Rendition</th>
+                        <th>Est. Throughput</th>
+                        <th>Buffer</th>
+                        <th>Stalls</th>
+                        <th>Switches</th>
+                        <th>Startup</th>
+                    </tr>
+                </thead>
+                <tbody id="viewer-rows">
+                    <tr><td colspan="8" style="color: var(--text-muted);">No viewers running.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="glass-card">
+            <label style="margin-top: 0; margin-bottom: 0.75rem;"><i class="fa-solid fa-terminal"></i> Live Segment Stream</label>
+            <div id="output">Per-segment fetches, rendition switches and rebuffer events will appear here once streaming starts…</div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let metricsTimer = null;
+
+        // The ladder this host serves, injected server-side. Used for the demand estimate
+        // below, which needs the pinned rung's bitrate before any test has run.
+        const LADDER = [
+            {% for r in renditions %}{ name: "{{ r.name }}", kbps: {{ r.bitrate_kbps }} }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+
+        // Populates the Bind Interface dropdown from real interfaces on this host.
+        // If detection is unavailable (off-Linux dev, no iproute2, or the request
+        // simply fails) the static wlan0/eth0 options already in the markup are
+        // left in place rather than cleared out.
+        async function loadInterfaces() {
+            const select = document.getElementById('interface');
+            try {
+                const res = await fetch('interfaces', { cache: 'no-store' });
+                const data = await res.json();
+                if (data.success && data.interfaces && data.interfaces.length) {
+                    const previous = select.value;
+                    select.innerHTML = data.interfaces.map((i) => `<option value="${i}">${i}</option>`).join('');
+                    if (data.interfaces.includes(previous)) select.value = previous;
+                }
+            } catch (e) { /* keep the default options */ }
+        }
+
+        function setStatus(msg, color) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.style.color = color || 'var(--color-orange)';
+        }
+
+        function setRunning(running) {
+            document.getElementById('btn-start').disabled = running;
+            document.getElementById('btn-stop').disabled  = !running;
+        }
+
+        function updateAbrToggle() {
+            // The rendition picker only means anything with ABR off; leaving it live
+            // would imply the fixed choice still applies when it doesn't.
+            document.getElementById('rendition').disabled = document.getElementById('abr').checked;
+            updateIntensityLabel();
+        }
+
+        function updateIntensityLabel() {
+            const val = parseInt(document.getElementById('intensity').value);
+            document.getElementById('intensity-value').textContent = `${val} viewer${val == 1 ? '' : 's'}`;
+
+            // Peak demand is what the operator actually wants to know before starting:
+            // N viewers pinned to a rung need N x that bitrate sustained. Under ABR the
+            // top of the ladder is the ceiling rather than a commitment.
+            const note = document.getElementById('demand-note');
+            if (!LADDER.length) { note.textContent = ''; return; }
+            const abr = document.getElementById('abr').checked;
+            if (abr) {
+                const top = LADDER[LADDER.length - 1];
+                note.textContent = `${val} independent viewer${val == 1 ? '' : 's'}, each with its own buffer, `
+                    + `bandwidth estimate and ladder position. Ceiling is ${(val * top.kbps / 1000).toFixed(1)} Mbps `
+                    + `if every viewer reaches ${top.name}; ABR will settle lower on a constrained link.`;
+            } else {
+                const sel = document.getElementById('rendition').value;
+                const rung = LADDER.find((r) => r.name === sel) || LADDER[LADDER.length - 1];
+                note.textContent = `${val} viewer${val == 1 ? '' : 's'} pinned to ${rung.name} needs `
+                    + `${(val * rung.kbps / 1000).toFixed(1)} Mbps sustained. Short of that the viewers rebuffer `
+                    + `rather than downshift — which is the point of the fixed mode.`;
+            }
+        }
+
+        async function scanLAN() {
+            const btn = document.getElementById('btn-scan');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning…';
+            const iface = document.getElementById('interface').value || 'wlan0';
+            setStatus(`Scanning LAN on ${iface} for other Video Stream Simulator instances…`, 'var(--color-blue)');
+            document.getElementById('scan-results').innerHTML = '';
+
+            try {
+                const res = await fetch('scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bind_interface: iface })
+                });
+                // The scan can fail in ways that never produce JSON (proxy timeout, an
+                // unhandled 500). Read the body as text first so those surface as the real
+                // status/message rather than an opaque JSON parse error.
+                const raw = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (parseErr) {
+                    setStatus(`Scan failed: HTTP ${res.status} — ${raw.slice(0, 200) || res.statusText}`, 'var(--color-pink)');
+                    return;
+                }
+                if (data.error) {
+                    setStatus('Scan error: ' + data.error, 'var(--color-pink)');
+                } else if (!data.servers || data.servers.length === 0) {
+                    const where = data.subnet ? `${data.subnet} via ${data.interface}` : iface;
+                    setStatus(`No instances found: scanned ${where} for hosts with port ${data.port || 5012} open.`);
+                } else {
+                    setStatus(`Found ${data.servers.length} instance(s) on ${iface}. Click one to select it (defaults to port 80).`, 'var(--color-green)');
+                    const div = document.getElementById('scan-results');
+                    data.servers.forEach(item => {
+                        const ip = item.ip;
+                        const b = document.createElement('button');
+                        b.innerHTML = `<i class="fa-solid fa-server"></i> ${ip}`;
+                        b.onclick = () => {
+                            document.getElementById('target-ip').value = ip;
+                            document.getElementById('target-port').value = 80;
+                            setStatus(`Selected target: ${ip}:80`, 'var(--color-green)');
+                        };
+                        div.appendChild(b);
+                    });
+                }
+            } catch (e) {
+                setStatus('Scan failed: ' + e, 'var(--color-pink)');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-radar"></i> Scan LAN';
+            }
+        }
+
+        async function startTest() {
+            let targetIp   = document.getElementById('target-ip').value.trim();
+            let targetPort = parseInt(document.getElementById('target-port').value) || 80;
+            const duration = parseInt(document.getElementById('duration').value) || 10;
+            const intensity = parseInt(document.getElementById('intensity').value) || 2;
+            const abr = document.getElementById('abr').checked;
+            const rendition = document.getElementById('rendition').value;
+
+            if (!targetIp) { setStatus('Please enter a target IP address.', 'var(--color-pink)'); return; }
+
+            if (targetIp.includes(':')) {
+                const parts = targetIp.split(':');
+                targetIp = parts[0];
+                targetPort = parseInt(parts[1]) || targetPort;
+            }
+
+            document.getElementById('output').textContent = '';
+            setRunning(true);
+            setStatus(`Starting ${intensity} viewer${intensity == 1 ? '' : 's'} against ${targetIp}:${targetPort}…`, 'var(--color-blue)');
+
+            try {
+                const res = await fetch('start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        target_ip: targetIp,
+                        target_port: targetPort,
+                        duration_minutes: duration,
+                        intensity: intensity,
+                        abr: abr,
+                        rendition: rendition
+                    })
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus('Error: ' + data.error, 'var(--color-pink)');
+                    setRunning(false);
+                    return;
+                }
+            } catch (e) {
+                setStatus('Failed to start: ' + e, 'var(--color-pink)');
+                setRunning(false);
+                return;
+            }
+
+            setStatus(`Streaming against ${targetIp}:${targetPort}…`, 'var(--color-green)');
+            startStream();
+            startMetrics();
+        }
+
+        function startStream() {
+            if (eventSource) eventSource.close();
+            const out = document.getElementById('output');
+            out.textContent = '';
+
+            eventSource = new EventSource('stream');
+            eventSource.onmessage = (e) => {
+                if (e.data === '') return; // keepalive
+                out.textContent += e.data.replace(/\\n/g, '\n') + '\n';
+                out.scrollTop = out.scrollHeight;
+            };
+            eventSource.onerror = () => {
+                eventSource.close();
+                eventSource = null;
+                setRunning(false);
+                setStatus('Streaming simulation finished.', 'var(--color-green)');
+                // One last poll so the tiles show the final tallies rather than
+                // whatever the second-to-last refresh happened to catch.
+                refreshMetrics();
+                stopMetrics();
+            };
+        }
+
+        function startMetrics() {
+            stopMetrics();
+            refreshMetrics();
+            metricsTimer = setInterval(refreshMetrics, 1000);
+        }
+
+        function stopMetrics() {
+            if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
+        }
+
+        function pill(state) {
+            const cls = ['playing', 'buffering', 'starting', 'finished', 'error'].includes(state) ? state : 'starting';
+            return `<span class="pill pill-${cls}">${state}</span>`;
+        }
+
+        async function refreshMetrics() {
+            try {
+                const res = await fetch('metrics', { cache: 'no-store' });
+                const data = await res.json();
+                const agg = data.aggregate || {};
+
+                document.getElementById('stat-bitrate').innerHTML =
+                    agg.avg_bitrate_kbps ? `${(agg.avg_bitrate_kbps / 1000).toFixed(1)}<small>Mbps</small>` : '—';
+                document.getElementById('stat-stalls').textContent =
+                    agg.stalls === undefined ? '—' : agg.stalls;
+                document.getElementById('stat-stall-time').innerHTML =
+                    agg.stall_seconds === undefined ? '—' : `${agg.stall_seconds.toFixed(1)}<small>s</small>`;
+                document.getElementById('stat-startup').innerHTML =
+                    agg.avg_startup_s == null ? '—' : `${agg.avg_startup_s.toFixed(2)}<small>s</small>`;
+                document.getElementById('stat-total').innerHTML =
+                    agg.total_mb === undefined ? '—' : `${agg.total_mb.toFixed(1)}<small>MB</small>`;
+
+                const tbody = document.getElementById('viewer-rows');
+                if (!data.viewers || !data.viewers.length) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="color: var(--text-muted);">No viewers running.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.viewers.map((v) => `
+                    <tr>
+                        <td>v${v.viewer_id}</td>
+                        <td>${pill(v.state)}</td>
+                        <td>${v.rendition}${v.bitrate_kbps ? ` <span style="color: var(--text-muted);">${v.bitrate_kbps}k</span>` : ''}</td>
+                        <td>${v.throughput_kbps ? (v.throughput_kbps / 1000).toFixed(2) + ' Mbps' : '—'}</td>
+                        <td>${v.buffer_s.toFixed(1)}s</td>
+                        <td>${v.stalls}${v.stall_seconds ? ` (${v.stall_seconds.toFixed(1)}s)` : ''}</td>
+                        <td>${v.switches}</td>
+                        <td>${v.startup_s == null ? '—' : v.startup_s.toFixed(2) + 's'}</td>
+                    </tr>
+                `).join('');
+            } catch (e) { /* transient poll failure; keep the last values on screen */ }
+        }
+
+        async function stopTest() {
+            await fetch('stop', { method: 'POST' });
+            if (eventSource) { eventSource.close(); eventSource = null; }
+            setRunning(false);
+            setStatus('Streaming simulation stopped.', 'var(--color-orange)');
+            refreshMetrics();
+            stopMetrics();
+        }
+
+        // The simulation runs in the server process, not in this page, so navigating
+        // away or reloading leaves it running. Ask on load whether one is in progress
+        // and restore the controls, metrics and live log if so.
+        //
+        // Log output produced before we attach is gone: output_queue is consumed
+        // destructively and nothing retains it, so the log resumes from the moment of
+        // reattach. The metrics table does not have that problem -- it is current
+        // state rather than a stream, so it repopulates in full.
+        async function reattach() {
+            try {
+                const res = await fetch('status', { cache: 'no-store' });
+                const data = await res.json();
+                if (!data.running) { refreshMetrics(); return; }
+
+                setRunning(true);
+                setStatus(
+                    `Reattached to a simulation already in progress (${data.active_viewers} viewer(s)).`,
+                    'var(--color-green)'
+                );
+                startStream();
+                startMetrics();
+                document.getElementById('output').textContent =
+                    '— reattached to a running simulation; earlier output was not retained —\n';
+            } catch (e) {
+                /* Leave the idle state alone -- a failed probe shouldn't block the UI. */
+            }
+        }
+
+        loadInterfaces();
+        updateAbrToggle();
+        reattach();
+    </script>
+</body>
+</html>

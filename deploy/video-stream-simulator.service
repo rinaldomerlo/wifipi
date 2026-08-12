@@ -1,0 +1,23 @@
+[Unit]
+Description=Video Stream Simulator (Flask / Gunicorn)
+After=network.target
+
+[Service]
+# Uncomment and set User/Group if you wish to run as a specific non-root user (e.g., User=jenkins or User=pi).
+# If omitted, systemd runs the service as root.
+# User=pi
+# Group=pi
+WorkingDirectory=/opt/wifipi/video_stream_simulator
+# Set VIDEOSTREAM_USE_FFMPEG=1 to generate a real (decodable) H.264 ladder with
+# ffmpeg on first start instead of synthetic segment bytes. Only worth it if you
+# intend to point an actual player at the corpus -- encoding it takes many minutes
+# of full-load CPU on a Pi, and the network behaviour is identical either way.
+#Environment=VIDEOSTREAM_USE_FFMPEG=1
+# More threads than the other apps: each simulated viewer holds a segment request
+# open for its whole download, so the default 4 would cap concurrency well below
+# the 10-viewer maximum the UI offers.
+ExecStart=/opt/wifipi/.venv/bin/gunicorn --bind 0.0.0.0:5012 --workers 1 --threads 16 --timeout 120 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
