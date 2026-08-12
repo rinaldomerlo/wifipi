@@ -600,10 +600,10 @@
                     </div>
 
                     <label class="check-row" for="randomize-mac">
-                        <input type="checkbox" id="randomize-mac" checked>
+                        <input type="checkbox" id="randomize-mac">
                         <span><i class="fa-solid fa-shuffle"></i> Randomize MAC on churn</span>
                     </label>
-                    <div class="hint">Each reconnect picks a fresh random MAC, so the AP sees a brand-new station every cycle. Untick to churn under the interface's own MAC instead.</div>
+                    <div class="hint">Off by default: a real household device keeps its own MAC across reconnects. Tick to make each reconnect pick a fresh random MAC so the AP sees a brand-new station every cycle (an association-table storm rather than household behaviour).</div>
                 </div>
             </div>
 

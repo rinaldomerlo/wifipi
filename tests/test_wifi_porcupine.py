@@ -477,6 +477,7 @@ class TestWifiPorcupine(unittest.TestCase):
                 "presence": 40,
                 "churn": 25,
                 "variability": 70,
+                "randomize_mac": True,
                 "duration_minutes": 5,
             })
         self.assertEqual(response.status_code, 200)
@@ -490,6 +491,18 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertEqual(config['churn'], 25)
         self.assertEqual(config['variability'], 70)
         self.assertTrue(config['randomize_mac'])
+
+    @patch('wifi_porcupine.app.threading.Thread')
+    def test_start_route_randomize_mac_defaults_off(self, mock_thread):
+        """Household emulation is the default posture: a real device keeps its own MAC, so
+        MAC randomization must be off unless the run explicitly asks for it."""
+        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
+             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']):
+            response = self.client.post('/api/start', json={
+                "interfaces": ["wlan0"], "ssid": "MyNet",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(mock_thread.call_args[1]['args'][0]['randomize_mac'])
         self.assertTrue(wp_app_module.run_state['running'])
 
     @patch('wifi_porcupine.app.threading.Thread')

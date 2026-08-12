@@ -897,7 +897,7 @@ def api_start():
     if duration < 1:
         return jsonify({"error": "Duration must be at least 1 minute."}), 400
 
-    randomize_mac = bool(data.get("randomize_mac", True))
+    randomize_mac = bool(data.get("randomize_mac", False))
 
     config = {
         "interfaces": clean,

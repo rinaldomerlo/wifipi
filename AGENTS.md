@@ -290,9 +290,10 @@ Project Root Structure:
   reconnect so the hub sees a constant stream of brand-new stations bloating its association / DHCP-lease /
   ARP tables. Each interface is a "spine" repeatedly poking the AP.
 - **Association/MAC churn**: one NetworkManager profile per interface (`porcupine-<iface>`). A `randomize_mac`
-  toggle in the UI (default on) controls whether the profile is created with
-  `802-11-wireless.cloned-mac-address random` (`build_profile_add_args`) — off, the interface churns under
-  its own real MAC. A per-interface daemon thread loops connect → dwell → disconnect → gap; the (possibly
+  toggle in the UI (default **off**, matching the household-emulation aim — a real device keeps its own MAC;
+  the server-side fallback in `/api/start` is `False` too) controls whether the profile is created with
+  `802-11-wireless.cloned-mac-address random` (`build_profile_add_args`) — on, each reconnect looks like a
+  brand-new station (an association-table storm); off, the interface churns under its own real MAC. A per-interface daemon thread loops connect → dwell → disconnect → gap; the (possibly
   cloned) MAC is read back from `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
 - **Churn shape**: three orthogonal sliders, not one. **Presence** (5–95%) is the duty cycle — what
   fraction of each cycle the interface stays associated. **Churn rate** is a fine-grained position (1–100)
