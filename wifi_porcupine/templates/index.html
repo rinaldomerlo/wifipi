@@ -237,6 +237,46 @@
             background: transparent;
         }
 
+        .slider-field {
+            margin: 0.85rem 0 0.35rem;
+        }
+
+        .slider-field input[type="range"] {
+            display: block;
+            width: 100%;
+            flex: none;
+        }
+
+        .slider-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 0.5rem;
+            margin-bottom: 0.3rem;
+            font-size: 0.9rem;
+        }
+
+        .slider-sub {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 400;
+        }
+
+        .slider-val {
+            font-family: var(--font-heading);
+            font-weight: 600;
+            color: var(--color-blue);
+            white-space: nowrap;
+        }
+
+        .slider-scale {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2px;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
         .row {
             display: flex;
             gap: 0.75rem;
@@ -535,13 +575,37 @@
                     </div>
                     <div class="hint">Each selected interface associates, holds briefly, then disconnects and reconnects — a new station to the AP every cycle. Interfaces churn independently and at random, never in lockstep.</div>
 
-                    <label for="intensity"><i class="fa-solid fa-gauge-high"></i> Intensity</label>
-                    <div class="row" style="gap: 1rem;">
-                        <input id="intensity" type="range" min="{{ intensity_min }}" max="{{ intensity_max }}" value="{{ intensity_default }}" oninput="updateIntensityLabel()">
-                        <span id="intensity-value" style="font-family: var(--font-heading); font-weight: 600; color: var(--color-blue); white-space: nowrap; min-width: 2.5em; text-align: right;">{{ intensity_default }}</span>
+                    <label><i class="fa-solid fa-gauge-high"></i> Churn behaviour</label>
+
+                    <div class="slider-field">
+                        <div class="slider-head">
+                            <span><i class="fa-solid fa-signal"></i> Presence <span class="slider-sub">— time connected</span></span>
+                            <span class="slider-val" id="presence-value">{{ presence_default }}%</span>
+                        </div>
+                        <input id="presence" type="range" min="{{ presence_min }}" max="{{ presence_max }}" value="{{ presence_default }}" step="1" oninput="updateChurnReadout()">
+                        <div class="slider-scale"><span>mostly off (household)</span><span>almost always on</span></div>
                     </div>
-                    <div class="hint">Controls churn speed — shorter dwell time between reconnects. Every ticked interface above churns simultaneously.</div>
-                    <div class="hint" id="intensity-rate" style="color: var(--color-blue);"></div>
+
+                    <div class="slider-field">
+                        <div class="slider-head">
+                            <span><i class="fa-solid fa-repeat"></i> Churn rate <span class="slider-sub">— reconnects / min</span></span>
+                            <span class="slider-val" id="churn-value">—</span>
+                        </div>
+                        <input id="churn" type="range" min="{{ churn_min }}" max="{{ churn_max }}" value="{{ churn_default }}" step="1" oninput="updateChurnReadout()">
+                        <div class="slider-scale"><span>very slow</span><span>very high (storm)</span></div>
+                    </div>
+
+                    <div class="slider-field">
+                        <div class="slider-head">
+                            <span><i class="fa-solid fa-shuffle"></i> Variability <span class="slider-sub">— burstiness</span></span>
+                            <span class="slider-val" id="variability-value">—</span>
+                        </div>
+                        <input id="variability" type="range" min="{{ variability_min }}" max="{{ variability_max }}" value="{{ variability_default }}" step="1" oninput="updateChurnReadout()">
+                        <div class="slider-scale"><span>metronomic</span><span>very bursty</span></div>
+                    </div>
+
+                    <div class="hint" id="churn-readout" style="color: var(--color-blue);"></div>
+                    <div class="hint">Every ticked interface churns simultaneously and independently — each with its own random phase and pace, so they never move in lockstep.</div>
 
                     <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
                     <input id="duration" type="number" value="60" min="1">
@@ -607,25 +671,46 @@
         let statusTimer = null;
         let outputCursor = 0;
 
-        // Mirrors compute_dwell_range() in app.py so the estimate below the slider
-        // can't drift out of sync with what the churn engine actually does.
-        const INTENSITY_MIN = {{ intensity_min }};
-        const INTENSITY_MAX = {{ intensity_max }};
-        const DWELL_MIN = [{{ dwell_min[0] }}, {{ dwell_min[1] }}];
-        const DWELL_MAX = [{{ dwell_max[0] }}, {{ dwell_max[1] }}];
-        const GAP_RANGE = [{{ gap_range[0] }}, {{ gap_range[1] }}];
+        // Mirrors churn_rate_from_pos() / compute_durations() / achievable_rate() in app.py so the
+        // readout below the sliders can't drift out of sync with what the churn engine actually does.
+        const PRESENCE_MIN = {{ presence_min }}, PRESENCE_MAX = {{ presence_max }};
+        const CHURN_MIN = {{ churn_min }}, CHURN_MAX = {{ churn_max }};
+        const VARIABILITY_MIN = {{ variability_min }}, VARIABILITY_MAX = {{ variability_max }};
+        const RATE_AT_MIN = {{ rate_at_min }}, RATE_AT_MAX = {{ rate_at_max }};
         const OFFLINE_ESTIMATE = {{ offline_estimate }};
+        const MIN_DWELL = {{ min_dwell }}, GAP_MIN = {{ gap_min }};
 
-        function estimatedReconnectsPerMinute(intensity) {
-            // Geometric, mirroring compute_dwell_range() in app.py (see its docstring).
-            const t = (intensity - INTENSITY_MIN) / (INTENSITY_MAX - INTENSITY_MIN);
-            const dwellLow = DWELL_MIN[0] * Math.pow(DWELL_MAX[0] / DWELL_MIN[0], t);
-            const dwellHigh = DWELL_MIN[1] * Math.pow(DWELL_MAX[1] / DWELL_MIN[1], t);
-            const dwellAvg = (dwellLow + dwellHigh) / 2;
-            const gapAvg = (GAP_RANGE[0] + GAP_RANGE[1]) / 2;
-            // Include the fixed scan+DHCP cost; at high intensity it dominates the cycle, so
-            // leaving it out (as the old estimate did) overstates the achievable rate several-fold.
-            return 60 / (dwellAvg + gapAvg + OFFLINE_ESTIMATE);
+        function churnRateFromPos(pos) {
+            // Geometric, mirroring churn_rate_from_pos() in app.py (see its docstring).
+            const t = (pos - CHURN_MIN) / (CHURN_MAX - CHURN_MIN);
+            return RATE_AT_MIN * Math.pow(RATE_AT_MAX / RATE_AT_MIN, t);
+        }
+
+        function computeDurations(presence, churnPos) {
+            const duty = presence / 100;
+            const period = 60 / churnRateFromPos(churnPos);
+            const on = Math.max(MIN_DWELL, duty * period);
+            // Subtract the fixed scan+DHCP reconnect cost from the intended OFF (bring_up spends it).
+            const gap = Math.max(GAP_MIN, (1 - duty) * period - OFFLINE_ESTIMATE);
+            return { on, gap };
+        }
+
+        function achievableRate(presence, churnPos) {
+            const { on, gap } = computeDurations(presence, churnPos);
+            return 60 / (on + gap + OFFLINE_ESTIMATE);
+        }
+
+        function fmtDuration(s) {
+            return s < 90 ? `${Math.round(s)}s` : `${(s / 60).toFixed(1)}m`;
+        }
+
+        function variabilityWord(pos) {
+            const t = (pos - VARIABILITY_MIN) / (VARIABILITY_MAX - VARIABILITY_MIN);
+            if (t < 0.15) return 'metronomic';
+            if (t < 0.4) return 'fairly steady';
+            if (t < 0.7) return 'household-like';
+            if (t < 0.9) return 'bursty';
+            return 'very bursty';
         }
 
         function setStatus(msg, color) {
@@ -648,19 +733,26 @@
             btn.title = showing ? 'Show password' : 'Hide password';
         }
 
-        function updateIntensityLabel() {
-            const intensity = parseInt(document.getElementById('intensity').value);
-            document.getElementById('intensity-value').textContent = intensity;
+        function updateChurnReadout() {
+            const presence = parseInt(document.getElementById('presence').value);
+            const churnPos = parseInt(document.getElementById('churn').value);
+            const variability = parseInt(document.getElementById('variability').value);
 
-            const perInterface = estimatedReconnectsPerMinute(intensity);
-            const rate = perInterface >= 10 ? Math.round(perInterface) : perInterface.toFixed(1);
+            const { on, gap } = computeDurations(presence, churnPos);
+            const rate = achievableRate(presence, churnPos);
+            const rateStr = rate >= 10 ? Math.round(rate) : rate.toFixed(rate < 1 ? 2 : 1);
+
+            document.getElementById('presence-value').textContent = presence + '%';
+            document.getElementById('churn-value').textContent = rateStr + '/min';
+            document.getElementById('variability-value').textContent = variabilityWord(variability);
+
             const n = selectedInterfaces().length;
-            let text = `≈ ${rate} reconnects/min per interface`;
+            let text = `Connected ~${fmtDuration(on)}, off ~${fmtDuration(gap)} · ≈ ${rateStr} reconnects/min per interface`;
             if (n > 1) {
-                const total = perInterface * n;
-                text += ` (≈ ${total >= 10 ? Math.round(total) : total.toFixed(1)}/min total across ${n} interfaces)`;
+                const total = rate * n;
+                text += ` (≈ ${total >= 10 ? Math.round(total) : total.toFixed(1)}/min across ${n})`;
             }
-            document.getElementById('intensity-rate').textContent = text;
+            document.getElementById('churn-readout').textContent = text;
         }
 
         async function loadInterfaces() {
@@ -687,14 +779,14 @@
             } catch (e) {
                 list.innerHTML = '<div class="hint">Failed to load interfaces.</div>';
             } finally {
-                updateIntensityLabel();  // refreshes the "total across N interfaces" part
+                updateChurnReadout();  // refreshes the "total across N interfaces" part
             }
         }
 
         // Ticking/unticking an interface changes the total reconnect rate estimate,
-        // even though the slider itself hasn't moved.
+        // even though the sliders themselves haven't moved.
         document.getElementById('iface-list').addEventListener('change', (e) => {
-            if (e.target.classList.contains('iface-cb')) updateIntensityLabel();
+            if (e.target.classList.contains('iface-cb')) updateChurnReadout();
         });
 
         function selectedInterfaces() {
@@ -852,7 +944,9 @@
                 interfaces: interfaces,
                 ssid: ssid,
                 password: document.getElementById('password').value,
-                intensity: parseInt(document.getElementById('intensity').value) || {{ intensity_default }},
+                presence: parseInt(document.getElementById('presence').value) || {{ presence_default }},
+                churn: parseInt(document.getElementById('churn').value) || {{ churn_default }},
+                variability: parseInt(document.getElementById('variability').value),
                 duration_minutes: parseInt(document.getElementById('duration').value) || 60,
                 randomize_mac: document.getElementById('randomize-mac').checked,
             };
@@ -912,7 +1006,7 @@
             } catch (e) { /* leave idle state alone on a failed probe */ }
         }
 
-        updateIntensityLabel();
+        updateChurnReadout();
         loadInterfaces();
         reattach();
     </script>

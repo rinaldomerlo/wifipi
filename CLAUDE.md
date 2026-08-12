@@ -112,9 +112,17 @@ events instead of streaming them; `stdbuf` isn't usable here because `sudo` rese
 `802-11-wireless.cloned-mac-address random` behind a UI toggle so each reconnect gets a fresh MAC) plus
 `iw` for interface listing. Its systemd unit runs as **root** by default, so it needs no new sudoers entry
 and the "four apps need passwordless sudo" count above is unchanged — commands still shell out via
-`sudo <cmd>`, a harmless no-op under root. A single intensity slider controls churn speed (dwell time) only;
-concurrency is just however many interfaces are ticked — every one of them churns simultaneously, each
-independently randomized (a startup jitter plus per-cycle random dwell/gap) so they never move in lockstep.
+`sudo <cmd>`, a harmless no-op under root. Churn is shaped by three orthogonal sliders — **Presence**
+(what fraction of the time each interface stays associated, i.e. its duty cycle), **Churn rate**
+(reconnects/min, mapped geometrically), and **Variability** (how bursty vs. metronomic the per-cycle
+timing is, via the gamma shape). Presence + rate set each cycle's connected (ON) and disconnected (OFF)
+durations (`compute_durations()`), so a low Presence + slow rate models a quiet household device that is
+mostly disconnected while a high rate is an association storm; Variability only widens/narrows the spread
+without moving Presence or the rate. Concurrency is just however many interfaces are ticked — every one of
+them churns simultaneously, each independently randomized (a startup jitter, a per-interface speed bias,
+and per-cycle random ON/OFF draws) so they never move in lockstep. The JS in `templates/index.html` mirrors
+`churn_rate_from_pos()`/`compute_durations()`/`achievable_rate()` for the live readout, so keep the two in
+sync if you touch the model.
 It requires NetworkManager as the active backend, same caveat as `wifi_connection_manager`, and refuses up
 front off-Linux / without `nmcli`+`iw` so macOS dev gets a clear JSON error. It also runs a best-effort
 orphan sweep on startup (leftover `porcupine-*` NetworkManager profiles) so a hard restart is idempotent.

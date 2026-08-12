@@ -294,15 +294,22 @@ Project Root Structure:
   `802-11-wireless.cloned-mac-address random` (`build_profile_add_args`) — off, the interface churns under
   its own real MAC. A per-interface daemon thread loops connect → dwell → disconnect → gap; the (possibly
   cloned) MAC is read back from `/sys/class/net/<iface>/address` and logged. Profiles are deleted on stop.
-- **Intensity**: a single slider (1–10) controls speed only — interpolated dwell time high→short via
-  `compute_dwell_range`. Concurrency is not derived from it: every ticked interface churns simultaneously,
-  each in its own daemon thread. A random initial jitter (0..dwell_high) before each thread's first connect
-  keeps interfaces desynchronized from cycle 1, rather than all connecting in lockstep because `start_run`
-  launches them together. The slider bounds *and* the dwell/gap constants are templated into the page so a
-  JS-side estimate (`estimatedReconnectsPerMinute`, mirroring `compute_dwell_range`) can show "≈X
-  reconnects/min per interface" live under the slider — 1 is ~1.7/min, 10 is ~12.6/min, non-linear across
-  the range — plus a total across however many interfaces are currently ticked. Keep the JS formula and
-  `compute_dwell_range` in sync if either changes.
+- **Churn shape**: three orthogonal sliders, not one. **Presence** (5–95%) is the duty cycle — what
+  fraction of each cycle the interface stays associated. **Churn rate** is a fine-grained position (1–100)
+  mapped *geometrically* to reconnects/min (`churn_rate_from_pos`, `RATE_AT_MIN`..`RATE_AT_MAX`). **Variability**
+  (0–100) sets the gamma *shape* of the per-cycle draw (`gamma_shape_from_variability`) — 0 metronomic, 100
+  bursty — without moving Presence or the rate. `compute_durations(presence, churn)` turns the first two into
+  a per-cycle ON (associated) and OFF (idle gap) mean: `period = 60/rate`, `ON = presence·period`,
+  `OFF = (1-presence)·period` minus the fixed scan+DHCP reconnect cost (`OFFLINE_ESTIMATE_SECONDS`, which
+  `bring_up` already spends), floored at `MIN_DWELL`/`GAP_MIN`. So a low Presence + slow rate is a quiet
+  household device (mostly disconnected); a high rate is an association storm. Concurrency is not derived from
+  any of them: every ticked interface churns simultaneously in its own daemon thread. A random initial jitter
+  (0..full cycle) plus a per-run per-interface speed `bias` and the long-tailed per-cycle draw keep interfaces
+  desynchronized from cycle 1 rather than all connecting in lockstep because `start_run` launches them
+  together. All slider bounds and the model constants are templated into the page so the JS
+  (`churn_rate_from_pos`/`computeDurations`/`achievableRate`, mirroring the Python) can show a live "connected
+  ~X, off ~Y · ≈Z reconnects/min" readout — with the achievable rate capped honestly once the fixed reconnect
+  cost dominates at the top of the churn slider. Keep the JS and the Python helpers in sync if either changes.
 - **Target SSID convenience**: `GET /api/scan` scans one interface (`--rescan yes`; fine here since it's a
   single one-off request, not something polled on a timer like `wifi_connection_manager`'s status endpoint)
   and returns a deduped, signal-sorted network list purely so the SSID field can be filled by clicking

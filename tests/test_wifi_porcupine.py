@@ -39,7 +39,9 @@ class TestWifiPorcupine(unittest.TestCase):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Porcupine', response.data)
-        self.assertIn(b'Intensity', response.data)
+        self.assertIn(b'Presence', response.data)
+        self.assertIn(b'Churn rate', response.data)
+        self.assertIn(b'Variability', response.data)
 
     def test_index_route_has_password_visibility_toggle(self):
         html = self.client.get('/').get_data(as_text=True)
@@ -75,74 +77,125 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertIn('next', data)
         self.assertIn('dropped', data)
 
-    # -- intensity math --------------------------------------------------
+    # -- churn model math: Presence x Churn rate x Variability -----------
 
-    def test_compute_dwell_range_endpoints(self):
-        self.assertEqual(wp_app_module.compute_dwell_range(1),
-                         wp_app_module.DWELL_AT_MIN_INTENSITY)
-        self.assertEqual(wp_app_module.compute_dwell_range(10),
-                         wp_app_module.DWELL_AT_MAX_INTENSITY)
+    def test_churn_rate_from_pos_endpoints(self):
+        lo, hi = wp_app_module.CHURN_RANGE
+        self.assertAlmostEqual(wp_app_module.churn_rate_from_pos(lo), wp_app_module.RATE_AT_MIN)
+        self.assertAlmostEqual(wp_app_module.churn_rate_from_pos(hi), wp_app_module.RATE_AT_MAX)
 
-    def test_compute_dwell_range_monotonic(self):
-        low1, high1 = wp_app_module.compute_dwell_range(2)
-        low2, high2 = wp_app_module.compute_dwell_range(8)
-        self.assertLess(low2, low1)
-        self.assertLess(high2, high1)
+    def test_churn_rate_from_pos_monotonic_increasing(self):
+        rates = [wp_app_module.churn_rate_from_pos(p) for p in range(1, 101)]
+        self.assertTrue(all(b > a for a, b in zip(rates, rates[1:])))
 
-    def test_compute_dwell_range_slow_end_is_actually_slow(self):
-        """Intensity 1 must offer a genuinely slow churn -- minutes, not ~1/min."""
-        low, high = wp_app_module.compute_dwell_range(1)
-        self.assertGreaterEqual(low, 60.0)
+    def test_churn_rate_from_pos_is_geometric(self):
+        """Every slider step multiplies the rate by a constant ratio, so the midpoint is the
+        geometric mean of the endpoints -- each step has ~the same proportional effect."""
+        lo, hi = wp_app_module.CHURN_RANGE
+        mid = (lo + hi) / 2
+        r_lo = wp_app_module.churn_rate_from_pos(lo)
+        r_hi = wp_app_module.churn_rate_from_pos(hi)
+        self.assertAlmostEqual(wp_app_module.churn_rate_from_pos(mid), (r_lo * r_hi) ** 0.5, places=4)
 
-    def test_compute_dwell_range_is_geometric(self):
-        """Each step multiplies the dwell by a constant ratio, so the midpoint is the
-        geometric mean of the endpoints, not the arithmetic mean of a linear ramp."""
-        lo1, hi1 = wp_app_module.compute_dwell_range(1)
-        lo10, hi10 = wp_app_module.compute_dwell_range(10)
-        # intensity where t = 0.5
-        mid = (wp_app_module.INTENSITY_RANGE[0] + wp_app_module.INTENSITY_RANGE[1]) / 2
-        loM, hiM = wp_app_module.compute_dwell_range(mid)
-        self.assertAlmostEqual(loM, (lo1 * lo10) ** 0.5, places=4)
-        self.assertAlmostEqual(hiM, (hi1 * hi10) ** 0.5, places=4)
+    def test_churn_steps_have_even_proportional_effect(self):
+        rates = [wp_app_module.churn_rate_from_pos(p) for p in range(1, 101)]
+        ratios = [rates[i + 1] / rates[i] for i in range(len(rates) - 1)]
+        self.assertLess(max(ratios) / min(ratios), 1.001)
 
-    def test_intensity_steps_have_even_proportional_effect(self):
-        """The cure for "too subtle": no single slider step changes the dwell far more than
-        another. Under the old linear ramp the 9->10 step dwarfed the 1->2 step."""
-        means = [sum(wp_app_module.compute_dwell_range(i)) / 2 for i in range(1, 11)]
-        ratios = [means[i] / means[i + 1] for i in range(len(means) - 1)]
-        self.assertLess(max(ratios) / min(ratios), 1.05)
+    def test_compute_durations_household_default_is_mostly_off(self):
+        """The whole point of the redesign: a quiet household setting spends most of the
+        cycle disconnected, not connected."""
+        on, gap = wp_app_module.compute_durations(
+            wp_app_module.PRESENCE_DEFAULT, wp_app_module.CHURN_DEFAULT)
+        self.assertGreater(gap, on)  # off longer than on
+        self.assertGreater(on, 60.0)  # but still connected for minutes, not seconds
 
-    def test_sample_dwell_respects_clamps(self):
-        low, high = wp_app_module.compute_dwell_range(5)
-        for bias in (wp_app_module.DWELL_BIAS_RANGE[0], 1.0, wp_app_module.DWELL_BIAS_RANGE[1]):
-            cap = wp_app_module.DWELL_TAIL_FACTOR * bias * (low + high) / 2.0
-            for _ in range(2000):
-                d = wp_app_module.sample_dwell(low, high, bias)
-                self.assertGreaterEqual(d, wp_app_module.MIN_DWELL)
-                self.assertLessEqual(d, cap)
+    def test_compute_durations_presence_raises_connected_share(self):
+        low_on, low_gap = wp_app_module.compute_durations(20, 40)
+        high_on, high_gap = wp_app_module.compute_durations(80, 40)
+        self.assertGreater(high_on, low_on)
+        self.assertLess(high_gap, low_gap)
 
-    def test_sample_dwell_preserves_mean(self):
-        """The UI's reconnects/min estimate assumes mean dwell == (low + high) / 2."""
-        low, high = wp_app_module.compute_dwell_range(5)
-        samples = [wp_app_module.sample_dwell(low, high) for _ in range(20000)]
-        expected = (low + high) / 2.0
-        self.assertAlmostEqual(sum(samples) / len(samples), expected, delta=expected * 0.1)
+    def test_compute_durations_rate_shortens_the_cycle(self):
+        slow_on, slow_gap = wp_app_module.compute_durations(30, 5)
+        fast_on, fast_gap = wp_app_module.compute_durations(30, 60)
+        self.assertLess(fast_on + fast_gap, slow_on + slow_gap)
 
-    def test_sample_dwell_is_wider_than_the_uniform_band(self):
-        """A flat [low, high] band re-locks after a shared stall; the tail is what breaks batches."""
-        low, high = wp_app_module.compute_dwell_range(5)
-        samples = [wp_app_module.sample_dwell(low, high) for _ in range(5000)]
-        self.assertLess(min(samples), low)
-        self.assertGreater(max(samples), high)
+    def test_compute_durations_matches_requested_duty_when_unfloored(self):
+        """Away from the floors, the connected share of a whole cycle == Presence%."""
+        presence, churn = 40, 20
+        on, gap = wp_app_module.compute_durations(presence, churn)
+        period = on + gap + wp_app_module.OFFLINE_ESTIMATE_SECONDS
+        self.assertAlmostEqual(on / period, presence / 100.0, places=2)
 
-    def test_sample_dwell_bias_scales_the_mean(self):
-        low, high = wp_app_module.compute_dwell_range(5)
-        slow = [wp_app_module.sample_dwell(low, high, 1.4) for _ in range(20000)]
-        fast = [wp_app_module.sample_dwell(low, high, 0.6) for _ in range(20000)]
+    def test_compute_durations_respects_floors_at_the_extreme(self):
+        """Cranking churn to the top can't push ON below MIN_DWELL or the gap below GAP_MIN."""
+        on, gap = wp_app_module.compute_durations(wp_app_module.PRESENCE_RANGE[0],
+                                                  wp_app_module.CHURN_RANGE[1])
+        self.assertGreaterEqual(on, wp_app_module.MIN_DWELL)
+        self.assertGreaterEqual(gap, wp_app_module.GAP_MIN)
+
+    def test_achievable_rate_matches_request_when_not_capped(self):
+        """At a slow, reachable setting the achievable rate equals the requested rate."""
+        presence, churn = 30, 12
+        requested = wp_app_module.churn_rate_from_pos(churn)
+        self.assertAlmostEqual(wp_app_module.achievable_rate(presence, churn), requested, places=3)
+
+    def test_achievable_rate_capped_below_request_at_the_top(self):
+        """Past what the fixed scan+DHCP cost allows, the real rate falls below the requested one."""
+        churn = wp_app_module.CHURN_RANGE[1]
+        requested = wp_app_module.churn_rate_from_pos(churn)
+        self.assertLess(wp_app_module.achievable_rate(50, churn), requested)
+
+    def test_gamma_shape_from_variability_endpoints(self):
+        lo, hi = wp_app_module.VARIABILITY_RANGE
+        self.assertAlmostEqual(wp_app_module.gamma_shape_from_variability(lo),
+                               wp_app_module.SHAPE_AT_MIN_VARIABILITY)
+        self.assertAlmostEqual(wp_app_module.gamma_shape_from_variability(hi),
+                               wp_app_module.SHAPE_AT_MAX_VARIABILITY)
+
+    def test_gamma_shape_from_variability_monotonic_decreasing(self):
+        """More Variability => lower gamma shape => burstier timing."""
+        shapes = [wp_app_module.gamma_shape_from_variability(p) for p in range(0, 101, 5)]
+        self.assertTrue(all(b < a for a, b in zip(shapes, shapes[1:])))
+
+    def test_sample_period_respects_clamps(self):
+        for mean, floor in ((200.0, wp_app_module.MIN_DWELL), (2.0, wp_app_module.GAP_MIN)):
+            for bias in (wp_app_module.DWELL_BIAS_RANGE[0], 1.0, wp_app_module.DWELL_BIAS_RANGE[1]):
+                cap = wp_app_module.DWELL_TAIL_FACTOR * bias * mean
+                for _ in range(2000):
+                    d = wp_app_module.sample_period(mean, bias, floor)
+                    self.assertGreaterEqual(d, floor)
+                    self.assertLessEqual(d, max(cap, floor))
+
+    def test_sample_period_preserves_mean(self):
+        """The reconnects/min readout assumes the sampled mean == the requested mean."""
+        mean = 120.0
+        samples = [wp_app_module.sample_period(mean) for _ in range(20000)]
+        self.assertAlmostEqual(sum(samples) / len(samples), mean, delta=mean * 0.1)
+
+    def test_sample_period_bias_scales_the_mean(self):
+        mean = 120.0
+        slow = [wp_app_module.sample_period(mean, 1.4) for _ in range(20000)]
+        fast = [wp_app_module.sample_period(mean, 0.6) for _ in range(20000)]
         self.assertGreater(sum(slow) / len(slow), sum(fast) / len(fast))
 
+    def test_sample_period_variability_widens_the_spread(self):
+        """Lower gamma shape (higher Variability) must produce a wider spread at the same mean."""
+        mean = 120.0
+        regular = wp_app_module.gamma_shape_from_variability(wp_app_module.VARIABILITY_RANGE[0])
+        bursty = wp_app_module.gamma_shape_from_variability(wp_app_module.VARIABILITY_RANGE[1])
+
+        def stdev(shape):
+            xs = [wp_app_module.sample_period(mean, 1.0, wp_app_module.MIN_DWELL, shape)
+                  for _ in range(20000)]
+            m = sum(xs) / len(xs)
+            return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
+
+        self.assertGreater(stdev(bursty), stdev(regular))
+
     def test_dwell_bias_range_is_symmetric_about_one(self):
-        """Biases must average to 1.0 or the slider's rate estimate drifts."""
+        """Biases must average to 1.0 or the rate estimate drifts."""
         lo, hi = wp_app_module.DWELL_BIAS_RANGE
         self.assertAlmostEqual((lo + hi) / 2.0, 1.0)
         self.assertLess(lo, 1.0)
@@ -393,6 +446,26 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('wlan9', response.get_json()['error'])
 
+    def test_start_route_rejects_out_of_range_presence(self):
+        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
+             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']):
+            response = self.client.post('/api/start', json={
+                "interfaces": ["wlan0"], "ssid": "MyNet", "presence": 250,
+            })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Presence', response.get_json()['error'])
+
+    def test_start_route_accepts_zero_variability(self):
+        """Variability 0 is a valid (metronomic) setting, not a missing value."""
+        with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
+             patch('wifi_porcupine.app.get_wireless_interfaces', return_value=['wlan0']), \
+             patch('wifi_porcupine.app.threading.Thread') as mock_thread:
+            response = self.client.post('/api/start', json={
+                "interfaces": ["wlan0"], "ssid": "MyNet", "variability": 0,
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_thread.call_args[1]['args'][0]['variability'], 0)
+
     @patch('wifi_porcupine.app.threading.Thread')
     def test_start_route_valid_spawns_background_thread(self, mock_thread):
         with patch('wifi_porcupine.app.detect_wifi_mode', return_value=('live', None)), \
@@ -401,7 +474,9 @@ class TestWifiPorcupine(unittest.TestCase):
                 "interfaces": ["wlan0", "wlan1"],
                 "ssid": "MyNet",
                 "password": "secret",
-                "intensity": 7,
+                "presence": 40,
+                "churn": 25,
+                "variability": 70,
                 "duration_minutes": 5,
             })
         self.assertEqual(response.status_code, 200)
@@ -411,7 +486,9 @@ class TestWifiPorcupine(unittest.TestCase):
         self.assertEqual(kwargs['target'], wp_app_module.start_run)
         config = kwargs['args'][0]
         self.assertEqual(config['interfaces'], ['wlan0', 'wlan1'])
-        self.assertEqual(config['intensity'], 7)
+        self.assertEqual(config['presence'], 40)
+        self.assertEqual(config['churn'], 25)
+        self.assertEqual(config['variability'], 70)
         self.assertTrue(config['randomize_mac'])
         self.assertTrue(wp_app_module.run_state['running'])
 

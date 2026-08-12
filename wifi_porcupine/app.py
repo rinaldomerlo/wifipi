@@ -10,11 +10,16 @@ ARP tables far more than plain reconnect churn -- each interface is a
 
 Every ticked interface churns at once, independently and out of sync with the
 others (a random initial jitter, a constant per-interface speed bias, and a
-long-tailed per-cycle dwell keep them from lining up even when NetworkManager
+long-tailed per-cycle duration keep them from lining up even when NetworkManager
 stalls and releases them together) -- concurrency is just however many you
-select. A single
-intensity slider controls speed: how long each interface dwells associated
-before disconnecting and reconnecting.
+select. Three orthogonal knobs shape the churn: **Presence** (what fraction of the
+time each interface is associated -- the duty cycle), **Churn rate** (how many
+reconnects per minute), and **Variability** (how bursty vs. metronomic the per-cycle
+timing is). Presence and rate set the connected (ON) and disconnected (OFF) durations
+of every cycle (a low Presence + slow rate is a quiet household device that is mostly
+disconnected; a high rate is an association storm); Variability sets how far each cycle
+wanders from those means without moving Presence or the rate. See compute_durations()
+and gamma_shape_from_variability().
 
 Association/MAC churn goes through NetworkManager (`nmcli`, one connection
 profile per interface; MAC randomization sets
@@ -46,17 +51,36 @@ app = Flask(__name__)
 # --- Naming ---
 PROFILE_PREFIX = "porcupine"   # NetworkManager connection profiles: porcupine-<iface>
 
-# --- Intensity model (templated into the UI so the slider bounds can't drift) ---
-INTENSITY_RANGE = (1, 10)
-DEFAULT_INTENSITY = 5
-DWELL_AT_MIN_INTENSITY = (120.0, 240.0)  # (low, high) seconds associated at intensity 1 (slow: a reconnect every few minutes)
-DWELL_AT_MAX_INTENSITY = (2.0, 5.0)      # ... at intensity 10 (fast association storm)
-GAP_RANGE = (0.5, 2.0)                 # short idle gap between disassociate and the next reconnect
-# Rough fixed cost of a reconnect that intensity can't shrink: scan + DHCP, measured ~20s on a
-# 5-interface Pi run. Only used to make the UI's reconnects/min estimate honest -- without it the
-# estimate ignores the dominant term and badly overstates the achievable rate at high intensity.
+# --- Churn model: two orthogonal knobs (templated into the UI so the bounds can't drift) ---
+# Presence = the fraction of each cycle an interface stays associated (its duty cycle).
+# Churn rate = reconnects per minute. Together they fix the connected (ON) and disconnected
+# (OFF) durations of a cycle -- see compute_durations(). A low Presence + slow rate is a
+# quiet household device (mostly disconnected); a high rate is an association storm.
+PRESENCE_RANGE = (5, 95)               # percent of the time associated; slider bounds
+PRESENCE_DEFAULT = 30                  # a typical household device: connected under 1/3 of the time
+# The churn-rate slider is a fine-grained position mapped *geometrically* to a reconnect rate,
+# so every step has about the same proportional effect (very slow settings stay as adjustable as
+# very fast ones) -- the same reasoning the old intensity slider used. See churn_rate_from_pos().
+CHURN_RANGE = (1, 100)                 # slider position; wide + fine-grained for smooth control
+CHURN_DEFAULT = 12                     # ~0.1 reconnects/min -> ~1 reconnect / 10 min (household pace)
+RATE_AT_MIN = 0.05                     # reconnects/min at slider min: very slow (~1 per 20 min)
+RATE_AT_MAX = 20.0                     # reconnects/min at slider max: very high (storm; capped by reconnect cost)
+# Variability = how much each cycle's ON/OFF wanders from its mean -- the per-cycle randomness that
+# makes a real household read as bursty rather than metronomic. It sets the gamma *shape* of the
+# draw (higher shape = tighter = more regular; lower shape = heavier tail = burstier). Mean is
+# preserved regardless, so it does not move Presence or the rate. The default sits near the old
+# fixed shape (~2), which is a natural household feel; the ends run from near-clockwork to very bursty.
+VARIABILITY_RANGE = (0, 100)           # slider position: 0 = metronomic, 100 = very bursty
+VARIABILITY_DEFAULT = 50               # ~gamma shape 2.2 -- the household-realistic middle
+SHAPE_AT_MIN_VARIABILITY = 10.0        # near-regular timing (low spread) at slider min
+SHAPE_AT_MAX_VARIABILITY = 0.5         # heavy-tailed, bursty timing (high spread) at slider max
+GAP_MIN = 0.5                          # floor on the idle OFF gap between disassociate and reconnect, seconds
+# Rough fixed cost of a reconnect that no setting can shrink: scan + DHCP, measured ~20s on a
+# 5-interface Pi run. It is disconnected time too (so it counts against Presence), but bring_up()
+# already spends it, so we don't sleep it -- we subtract it from the intended OFF. It also makes the
+# UI's reconnects/min estimate honest: at high rate it dominates the cycle and caps the achievable rate.
 OFFLINE_ESTIMATE_SECONDS = 20.0
-DWELL_BIAS_RANGE = (0.4, 1.6)          # per-interface constant speed offset; see sample_dwell()
+DWELL_BIAS_RANGE = (0.4, 1.6)          # per-interface constant speed offset; see sample_period()
 RETRY_BACKOFF_BASE = 2.0               # first failed connect retries within this many seconds
 RETRY_BACKOFF_CAP = 60.0               # ceiling on the retry window; see compute_retry_delay()
 RETRY_BACKOFF_MAX_DOUBLINGS = 20       # guard so a long outage can't compute 2**huge
@@ -251,63 +275,101 @@ def classify_band(freq_mhz):
 
 
 # ---------------------------------------------------------------------------
-# Intensity math (pure helpers, unit-tested)
+# Churn model math (pure helpers, unit-tested)
 # ---------------------------------------------------------------------------
-def _intensity_fraction(intensity) -> float:
-    lo, hi = INTENSITY_RANGE
-    return (intensity - lo) / (hi - lo) if hi > lo else 0.0
+def churn_rate_from_pos(pos):
+    """Reconnects/min for a churn-rate slider position, mapped geometrically.
 
-
-def compute_dwell_range(intensity):
-    """(low, high) association dwell seconds for a given intensity; shrinks as intensity rises.
-
-    The interpolation is geometric (each step multiplies the dwell by a constant ratio), not
-    linear. Perceived churn rate is roughly 1/dwell, so a linear dwell ramp bunches all the
-    perceptible change at the top of the slider and leaves the low half nearly flat -- which is
-    what made the old slider feel "too subtle". Geometric spacing gives every step about the
-    same proportional effect on the rate, so slow settings are as adjustable as fast ones.
+    Perceived activity is roughly the rate itself, so a linear position->rate ramp would bunch
+    all the perceptible change at the top of the slider and leave the low half nearly flat.
+    Geometric spacing (each step multiplies the rate by a constant ratio) gives every step about
+    the same proportional effect, so a very-slow household pace is as adjustable as a fast one.
     """
-    t = _intensity_fraction(intensity)
-    low = DWELL_AT_MIN_INTENSITY[0] * (DWELL_AT_MAX_INTENSITY[0] / DWELL_AT_MIN_INTENSITY[0]) ** t
-    high = DWELL_AT_MIN_INTENSITY[1] * (DWELL_AT_MAX_INTENSITY[1] / DWELL_AT_MIN_INTENSITY[1]) ** t
-    return (low, high)
+    lo, hi = CHURN_RANGE
+    t = (pos - lo) / (hi - lo) if hi > lo else 0.0
+    return RATE_AT_MIN * (RATE_AT_MAX / RATE_AT_MIN) ** t
 
 
-def sample_dwell(low, high, bias=1.0, rng=random):
-    """Draw one association dwell time, in seconds, for a single churn cycle.
+def compute_durations(presence, churn_pos):
+    """(on_mean, gap_mean) seconds for a Presence% and a churn-rate slider position.
 
-    Drawing uniformly from [low, high] is not enough to keep interfaces apart in
-    practice. Reconnecting means scanning first, and something upstream (NM or
-    wpa_supplicant) aligns *scan starts* across devices: in a NetworkManager
-    journal from this app, each scan reliably took ~6.2s on its own device, yet
-    pairs of devices that had gone disconnected 0.2s apart began scanning at the
-    same instant to 20ms. That shared slot re-phases interfaces every cycle, and
-    interfaces that also share one mean period just re-lock after each collapse,
-    which is what makes the log read as batches.
+    The two knobs are orthogonal and together fix the whole cycle:
+        period    = 60 / rate                       (rate from churn_rate_from_pos)
+        ON  (mean) = presence * period              -- time associated
+        OFF (mean) = (1 - presence) * period        -- time disconnected
 
-    `bias` is what breaks that: a constant per-interface speed offset drawn once
-    per run, so no two interfaces share a mean period and they drift across the
-    slot boundary instead of marching back into step. Simulating five interfaces
-    against that quantizer, the share of associations landing alone rather than
-    in a clump rises from ~14% at a common period to ~24% across the width of
-    DWELL_BIAS_RANGE (at a 20s slot; the gain holds at every slot size tried),
-    which is why that range is deliberately wide.
-
-    The gamma tail (shape 2) rather than a flat band does *not* help the batching
-    -- once `bias` is in play the same simulation puts it a fraction of a percent
-    behind a plain uniform draw, consistently. It earns its place on the other
-    half of the complaint: a single interface pacing a narrow uniform band looks
-    metronomic in the log, and this makes its own timing read as genuinely random.
-    If you are tempted to simplify, drop the tail, not the bias.
-
-    The mean is preserved at `bias * (low + high) / 2`, and `bias` is symmetric
-    about 1.0, so the reconnect-rate estimate under the intensity slider stays
-    honest. Clamped to [MIN_DWELL, DWELL_TAIL_FACTOR * mean] so the tail can't
-    strand an interface associated for minutes.
+    The idle gap we actually sleep is that OFF minus the fixed scan+DHCP reconnect cost: that
+    cost is disconnected time too (so it counts against Presence), but bring_up() already spends
+    it, so sleeping the full OFF on top would double-count it. Both returned means are floored
+    (ON at MIN_DWELL, gap at GAP_MIN). When the requested OFF is shorter than the reconnect cost
+    -- the top of the churn slider -- the gap floors and the achievable rate falls below the
+    requested one; achievable_rate() reports that honestly.
     """
-    mean = bias * (low + high) / 2.0
-    sample = rng.gammavariate(2.0, mean / 2.0)
-    return max(MIN_DWELL, min(DWELL_TAIL_FACTOR * mean, sample))
+    duty = presence / 100.0
+    period = 60.0 / churn_rate_from_pos(churn_pos)
+    on_mean = max(MIN_DWELL, duty * period)
+    gap_mean = max(GAP_MIN, (1.0 - duty) * period - OFFLINE_ESTIMATE_SECONDS)
+    return on_mean, gap_mean
+
+
+def achievable_rate(presence, churn_pos):
+    """Reconnects/min actually achievable, accounting for the reconnect cost and the ON/gap floors.
+
+    Equals the requested rate until the churn slider is pushed past what the fixed scan+DHCP cost
+    physically allows, after which it flattens out -- which is what keeps the UI estimate honest.
+    """
+    on_mean, gap_mean = compute_durations(presence, churn_pos)
+    return 60.0 / (on_mean + gap_mean + OFFLINE_ESTIMATE_SECONDS)
+
+
+def gamma_shape_from_variability(pos):
+    """Gamma shape for a Variability slider position, mapped geometrically.
+
+    Shape controls dispersion: the coefficient of variation of the draw is 1/sqrt(shape), so a
+    high shape is near-regular timing and a low shape is heavy-tailed and bursty. Geometric
+    spacing keeps every step's proportional effect on the spread about equal. The mean is
+    unaffected (sample_period sets the scale to preserve it), so this knob never moves Presence
+    or the reconnect rate -- it only changes how erratic the timing looks.
+    """
+    lo, hi = VARIABILITY_RANGE
+    t = (pos - lo) / (hi - lo) if hi > lo else 0.0
+    return SHAPE_AT_MIN_VARIABILITY * (SHAPE_AT_MAX_VARIABILITY / SHAPE_AT_MIN_VARIABILITY) ** t
+
+
+def sample_period(mean, bias=1.0, floor=MIN_DWELL, shape=2.0, rng=random):
+    """Draw one ON or OFF duration, in seconds, for a single churn cycle.
+
+    Using the mean flat for every cycle is not enough to keep interfaces apart in practice.
+    Reconnecting means scanning first, and something upstream (NM or wpa_supplicant) aligns *scan
+    starts* across devices: in a NetworkManager journal from this app, each scan reliably took
+    ~6.2s on its own device, yet pairs of devices that had gone disconnected 0.2s apart began
+    scanning at the same instant to 20ms. That shared slot re-phases interfaces every cycle, and
+    interfaces that also share one mean period just re-lock after each collapse, which is what
+    makes the log read as batches.
+
+    `bias` is what breaks that: a constant per-interface speed offset drawn once per run, so no
+    two interfaces share a mean period and they drift across the slot boundary instead of marching
+    back into step. Simulating five interfaces against that quantizer, the share of associations
+    landing alone rather than in a clump rises from ~14% at a common period to ~24% across the
+    width of DWELL_BIAS_RANGE (at a 20s slot; the gain holds at every slot size tried), which is
+    why that range is deliberately wide. The same `bias` scales both the ON and the OFF draw, so
+    an interface's duty cycle (its Presence) is preserved even as its overall pace drifts.
+
+    The gamma tail rather than a flat value does *not* help the batching -- once `bias` is in play
+    the same simulation puts it a fraction of a percent behind, consistently. It earns its place on
+    the other half of the complaint: a single interface pacing a fixed value looks metronomic in
+    the log, and this makes its own timing read as genuinely random. `shape` (from the Variability
+    slider, via gamma_shape_from_variability) sets how heavy that tail is -- low shape is bursty,
+    high shape is near-regular. If you are tempted to simplify, drop the tail, not the bias.
+
+    The scale is set to `m / shape` so the mean stays `bias * mean` for any shape, and `bias` is
+    symmetric about 1.0, so the reconnect-rate estimate stays honest. Clamped to
+    [floor, DWELL_TAIL_FACTOR * bias * mean] so the tail can't strand an interface for minutes
+    past its intended dwell.
+    """
+    m = bias * mean
+    sample = rng.gammavariate(shape, m / shape)
+    return max(floor, min(DWELL_TAIL_FACTOR * m, sample))
 
 
 def compute_retry_delay(failures, bias=1.0, rng=random):
@@ -397,17 +459,20 @@ def read_iface_mac(iface):
 # Churn engine
 # ---------------------------------------------------------------------------
 def churn_worker(iface, config):
-    """One interface's association/MAC churn loop: connect (new MAC) -> dwell -> disconnect -> gap.
+    """One interface's association/MAC churn loop: connect (new MAC) -> ON dwell -> disconnect -> OFF gap.
+
+    ON and OFF means come from compute_durations(Presence, churn rate); the OFF gap is the
+    disconnected time on top of the scan+DHCP reconnect cost bring_up() already spends.
 
     Interfaces are started together in start_run(), so without a stagger they'd all connect in
     lockstep on cycle 1. Three things keep them apart, and all three are needed:
 
     * an initial jitter spread across a full cycle, so cycle 1 is already staggered;
-    * a per-run `bias` giving this interface its own mean period (see sample_dwell()), so it
+    * a per-run `bias` giving this interface its own mean period (see sample_period()), so it
       drifts relative to its neighbours rather than sharing their rhythm -- this is the one
       that does the real work;
-    * a long-tailed per-cycle dwell, which keeps one interface's own timing from looking
-      metronomic (it does not help the batching -- see sample_dwell()).
+    * a long-tailed per-cycle duration, which keeps one interface's own timing from looking
+      metronomic (it does not help the batching -- see sample_period()).
 
     The stagger alone is not enough, because reconnecting requires a scan and scan starts are
     aligned across devices upstream of us, so interfaces sharing one mean period re-synchronize
@@ -418,10 +483,11 @@ def churn_worker(iface, config):
     separately via compute_retry_delay(), which is what keeps a saturated AP from collecting a
     lockstep retry storm from every interface at once.
     """
-    dwell_low, dwell_high = compute_dwell_range(config["intensity"])
+    on_mean, gap_mean = compute_durations(config["presence"], config["churn"])
+    shape = gamma_shape_from_variability(config["variability"])
     bias = random.uniform(*DWELL_BIAS_RANGE)
     failures = 0
-    _interruptible_sleep(random.uniform(0, dwell_high + GAP_RANGE[1]))
+    _interruptible_sleep(random.uniform(0, on_mean + gap_mean + OFFLINE_ESTIMATE_SECONDS))
     while not stop_event.is_set():
         ok, _, err = bring_up(iface)
         if stop_event.is_set():
@@ -443,7 +509,7 @@ def churn_worker(iface, config):
             stats["active_interfaces"] = len(run_state["connected"])
         _log(f"[{iface}] associated as {mac or 'unknown MAC'} -> {config['ssid']}")
 
-        _interruptible_sleep(sample_dwell(dwell_low, dwell_high, bias))
+        _interruptible_sleep(sample_period(on_mean, bias, MIN_DWELL, shape))
 
         bring_down(iface)
         with run_lock:
@@ -451,7 +517,7 @@ def churn_worker(iface, config):
             stats["active_interfaces"] = len(run_state["connected"])
         if not stop_event.is_set():
             _log(f"[{iface}] disassociated")
-        _interruptible_sleep(random.uniform(*GAP_RANGE))
+        _interruptible_sleep(sample_period(gap_mean, bias, GAP_MIN, shape))
 
     bring_down(iface)  # leave the radio idle on the way out
     with run_lock:
@@ -526,6 +592,11 @@ def duration_timer(minutes):
     threading.Thread(target=stop_run, daemon=True).start()
 
 
+def _fmt_duration(seconds):
+    """Compact human duration for log lines: '45s' up to ~90s, then '3.2m'."""
+    return f"{seconds:.0f}s" if seconds < 90 else f"{seconds / 60:.1f}m"
+
+
 def start_run(config):
     """Heavy setup for a run: profiles + churn threads. Runs in a thread.
 
@@ -534,9 +605,12 @@ def start_run(config):
     """
     global duration_thread
 
+    on_mean, gap_mean = compute_durations(config["presence"], config["churn"])
+    rate = achievable_rate(config["presence"], config["churn"])
     _log(
         f"Starting porcupine run: {len(config['interfaces'])} interface(s) -> "
-        f"SSID '{config['ssid']}', intensity {config['intensity']}"
+        f"SSID '{config['ssid']}', presence {config['presence']}% "
+        f"(~{_fmt_duration(on_mean)} on / ~{_fmt_duration(gap_mean)} off, ~{rate:.2g} reconnects/min)"
         + (", random MAC per reconnect" if config["randomize_mac"] else ", MAC unchanged")
     )
 
@@ -643,13 +717,20 @@ def index():
     return render_template(
         "index.html",
         hostname=get_hostname(),
-        intensity_min=INTENSITY_RANGE[0],
-        intensity_max=INTENSITY_RANGE[1],
-        intensity_default=DEFAULT_INTENSITY,
-        dwell_min=DWELL_AT_MIN_INTENSITY,
-        dwell_max=DWELL_AT_MAX_INTENSITY,
-        gap_range=GAP_RANGE,
+        presence_min=PRESENCE_RANGE[0],
+        presence_max=PRESENCE_RANGE[1],
+        presence_default=PRESENCE_DEFAULT,
+        churn_min=CHURN_RANGE[0],
+        churn_max=CHURN_RANGE[1],
+        churn_default=CHURN_DEFAULT,
+        variability_min=VARIABILITY_RANGE[0],
+        variability_max=VARIABILITY_RANGE[1],
+        variability_default=VARIABILITY_DEFAULT,
+        rate_at_min=RATE_AT_MIN,
+        rate_at_max=RATE_AT_MAX,
         offline_estimate=OFFLINE_ESTIMATE_SECONDS,
+        min_dwell=MIN_DWELL,
+        gap_min=GAP_MIN,
     )
 
 
@@ -789,11 +870,25 @@ def api_start():
     password = data.get("password") or ""
 
     try:
-        intensity = int(data.get("intensity", DEFAULT_INTENSITY))
+        presence = int(data.get("presence", PRESENCE_DEFAULT))
     except (TypeError, ValueError):
-        return jsonify({"error": "Intensity must be a number."}), 400
-    if not (INTENSITY_RANGE[0] <= intensity <= INTENSITY_RANGE[1]):
-        return jsonify({"error": f"Intensity must be between {INTENSITY_RANGE[0]} and {INTENSITY_RANGE[1]}."}), 400
+        return jsonify({"error": "Presence must be a number."}), 400
+    if not (PRESENCE_RANGE[0] <= presence <= PRESENCE_RANGE[1]):
+        return jsonify({"error": f"Presence must be between {PRESENCE_RANGE[0]} and {PRESENCE_RANGE[1]}%."}), 400
+
+    try:
+        churn = int(data.get("churn", CHURN_DEFAULT))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Churn rate must be a number."}), 400
+    if not (CHURN_RANGE[0] <= churn <= CHURN_RANGE[1]):
+        return jsonify({"error": f"Churn rate must be between {CHURN_RANGE[0]} and {CHURN_RANGE[1]}."}), 400
+
+    try:
+        variability = int(data.get("variability", VARIABILITY_DEFAULT))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Variability must be a number."}), 400
+    if not (VARIABILITY_RANGE[0] <= variability <= VARIABILITY_RANGE[1]):
+        return jsonify({"error": f"Variability must be between {VARIABILITY_RANGE[0]} and {VARIABILITY_RANGE[1]}."}), 400
 
     try:
         duration = int(data.get("duration_minutes", 60))
@@ -808,7 +903,9 @@ def api_start():
         "interfaces": clean,
         "ssid": ssid,
         "password": password,
-        "intensity": intensity,
+        "presence": presence,
+        "churn": churn,
+        "variability": variability,
         "duration_minutes": duration,
         "randomize_mac": randomize_mac,
     }
