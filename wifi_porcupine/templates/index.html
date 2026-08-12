@@ -237,6 +237,12 @@
             background: transparent;
         }
 
+        .churn-section {
+            margin-top: 1.25rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--glass-border);
+        }
+
         .slider-field {
             margin: 0.85rem 0 0.35rem;
         }
@@ -575,38 +581,6 @@
                     </div>
                     <div class="hint">Each selected interface associates, holds briefly, then disconnects and reconnects — a new station to the AP every cycle. Interfaces churn independently and at random, never in lockstep.</div>
 
-                    <label><i class="fa-solid fa-gauge-high"></i> Churn behaviour</label>
-
-                    <div class="slider-field">
-                        <div class="slider-head">
-                            <span><i class="fa-solid fa-signal"></i> Presence <span class="slider-sub">— time connected</span></span>
-                            <span class="slider-val" id="presence-value">{{ presence_default }}%</span>
-                        </div>
-                        <input id="presence" type="range" min="{{ presence_min }}" max="{{ presence_max }}" value="{{ presence_default }}" step="1" oninput="updateChurnReadout()">
-                        <div class="slider-scale"><span>mostly off (household)</span><span>almost always on</span></div>
-                    </div>
-
-                    <div class="slider-field">
-                        <div class="slider-head">
-                            <span><i class="fa-solid fa-repeat"></i> Churn rate <span class="slider-sub">— reconnects / min</span></span>
-                            <span class="slider-val" id="churn-value">—</span>
-                        </div>
-                        <input id="churn" type="range" min="{{ churn_min }}" max="{{ churn_max }}" value="{{ churn_default }}" step="1" oninput="updateChurnReadout()">
-                        <div class="slider-scale"><span>very slow</span><span>very high (storm)</span></div>
-                    </div>
-
-                    <div class="slider-field">
-                        <div class="slider-head">
-                            <span><i class="fa-solid fa-shuffle"></i> Variability <span class="slider-sub">— burstiness</span></span>
-                            <span class="slider-val" id="variability-value">—</span>
-                        </div>
-                        <input id="variability" type="range" min="{{ variability_min }}" max="{{ variability_max }}" value="{{ variability_default }}" step="1" oninput="updateChurnReadout()">
-                        <div class="slider-scale"><span>metronomic</span><span>very bursty</span></div>
-                    </div>
-
-                    <div class="hint" id="churn-readout" style="color: var(--color-blue);"></div>
-                    <div class="hint">Every ticked interface churns simultaneously and independently — each with its own random phase and pace, so they never move in lockstep.</div>
-
                     <label for="duration"><i class="fa-solid fa-clock"></i> Duration (minutes)</label>
                     <input id="duration" type="number" value="60" min="1">
                 </div>
@@ -631,6 +605,40 @@
                     </label>
                     <div class="hint">Each reconnect picks a fresh random MAC, so the AP sees a brand-new station every cycle. Untick to churn under the interface's own MAC instead.</div>
                 </div>
+            </div>
+
+            <div class="churn-section">
+                <label><i class="fa-solid fa-gauge-high"></i> Churn behaviour</label>
+
+                <div class="slider-field">
+                    <div class="slider-head">
+                        <span><i class="fa-solid fa-signal"></i> Presence <span class="slider-sub">— time connected</span></span>
+                        <span class="slider-val" id="presence-value">{{ presence_default }}%</span>
+                    </div>
+                    <input id="presence" type="range" min="{{ presence_min }}" max="{{ presence_max }}" value="{{ presence_default }}" step="1" oninput="updateChurnReadout()">
+                    <div class="slider-scale"><span>mostly off (household)</span><span>almost always on</span></div>
+                </div>
+
+                <div class="slider-field">
+                    <div class="slider-head">
+                        <span><i class="fa-solid fa-repeat"></i> Churn rate <span class="slider-sub">— reconnects / min</span></span>
+                        <span class="slider-val" id="churn-value">—</span>
+                    </div>
+                    <input id="churn" type="range" min="{{ churn_min }}" max="{{ churn_max }}" value="{{ churn_default }}" step="1" oninput="updateChurnReadout()">
+                    <div class="slider-scale"><span>very slow</span><span>very high (storm)</span></div>
+                </div>
+
+                <div class="slider-field">
+                    <div class="slider-head">
+                        <span><i class="fa-solid fa-shuffle"></i> Variability <span class="slider-sub">— burstiness</span></span>
+                        <span class="slider-val" id="variability-value">—</span>
+                    </div>
+                    <input id="variability" type="range" min="{{ variability_min }}" max="{{ variability_max }}" value="{{ variability_default }}" step="1" oninput="updateChurnReadout()">
+                    <div class="slider-scale"><span>metronomic</span><span>very bursty</span></div>
+                </div>
+
+                <div class="hint" id="churn-readout" style="color: var(--color-blue);"></div>
+                <div class="hint">Every ticked interface churns simultaneously and independently — each with its own random phase and pace, so they never move in lockstep.</div>
             </div>
 
             <div class="actions">
