@@ -462,6 +462,13 @@
         .pill-starting { background: rgba(255, 255, 255, 0.07); color: var(--text-secondary); }
         .pill-finished { background: rgba(0, 210, 255, 0.12); color: var(--color-blue); }
         .pill-error { background: rgba(255, 59, 116, 0.15); color: var(--color-pink); }
+        /* Deliberately louder than 'buffering': this one means the link cannot carry even
+           the bottom rung, which is a different problem from a viewer having a bad minute. */
+        .pill-link-limited {
+            background: rgba(255, 59, 116, 0.18);
+            color: var(--color-pink);
+            border: 1px solid rgba(255, 59, 116, 0.45);
+        }
 
         .ladder-note {
             font-size: 0.78rem;
@@ -829,8 +836,12 @@
         }
 
         function pill(state) {
-            const cls = ['playing', 'buffering', 'starting', 'finished', 'error'].includes(state) ? state : 'starting';
-            return `<span class="pill pill-${cls}">${state}</span>`;
+            const known = ['playing', 'buffering', 'starting', 'finished', 'error', 'link-limited'];
+            const cls = known.includes(state) ? state : 'starting';
+            const title = state === 'link-limited'
+                ? 'The link cannot carry even the lowest rendition. This is a network limit, not an app fault — see the log for how to confirm it independently.'
+                : '';
+            return `<span class="pill pill-${cls}" title="${title}">${state}</span>`;
         }
 
         async function refreshMetrics() {

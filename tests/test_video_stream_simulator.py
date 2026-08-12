@@ -6,6 +6,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import time
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -417,6 +418,117 @@ class TestSessionTransport(unittest.TestCase):
         retry = session.get_adapter('http://h/').max_retries
         self.assertEqual(retry.total, vs_app_module.PLAYLIST_ATTEMPTS)
         self.assertEqual(retry.backoff_factor, vs_app_module.PLAYLIST_RETRY_BACKOFF_S)
+
+
+class _SlowLinkHandler(BaseHTTPRequestHandler):
+    """Serves playlists instantly but segments slowly enough to sit under the bottom rung."""
+
+    protocol_version = 'HTTP/1.1'
+    master = (b'#EXTM3U\n'
+              b'#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=426x240\n240p/index.m3u8\n'
+              b'#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\n360p/index.m3u8\n')
+    media = (b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n'
+             b'#EXTINF:4.000,\nseg-0.ts\n#EXTINF:4.000,\nseg-1.ts\n#EXT-X-ENDLIST\n')
+    # 4 KB taking ~0.2s is ~160 kbps -- under the 400 kbps floor, and quick to test.
+    segment = b'y' * 4096
+    delay = 0.2
+
+    def do_GET(self):
+        if self.path.endswith('master.m3u8'):
+            body = self.master
+        elif self.path.endswith('index.m3u8'):
+            body = self.media
+        else:
+            time.sleep(self.delay)
+            body = self.segment
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+class TestLinkLimitedDetection(unittest.TestCase):
+    """A link too slow for the bottom rung must be reported as a link problem, in words.
+
+    The app previously emitted correct numbers that read exactly like a malfunctioning
+    player, which cost a full debugging session before anyone checked the link itself.
+    """
+
+    def setUp(self):
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), _SlowLinkHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.port = self.server.server_address[1]
+        vs_app_module.stop_event.clear()
+        vs_app_module.viewer_stats.clear()
+        vs_app_module.active_viewers = 0
+        while not vs_app_module.output_queue.empty():
+            vs_app_module.output_queue.get()
+
+    def tearDown(self):
+        vs_app_module.stop_event.set()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(5)
+        vs_app_module.stop_event.clear()
+        vs_app_module.viewer_stats.clear()
+        vs_app_module.active_viewers = 0
+
+    def _run_viewer(self, seconds=6.0):
+        thread = threading.Thread(
+            target=vs_app_module.run_viewer_loop,
+            args=(1, '127.0.0.1', self.port, 1, True, ''), daemon=True)
+        thread.start()
+        deadline = time.time() + seconds
+        # Captured while the viewer is live: joining ends the session, which overwrites
+        # the state with "finished".
+        self.observed_state = None
+        while time.time() < deadline:
+            state = vs_app_module.viewer_stats.get(1, {}).get('state')
+            if state == 'link-limited':
+                self.observed_state = state
+                break
+            time.sleep(0.1)
+        vs_app_module.stop_event.set()
+        thread.join(20)
+        lines = []
+        while not vs_app_module.output_queue.empty():
+            line = vs_app_module.output_queue.get()
+            if line:
+                lines.append(line)
+        return ''.join(lines)
+
+    def test_reports_link_limited_in_plain_words(self):
+        log = self._run_viewer()
+        self.assertIn('LINK-LIMITED', log)
+        self.assertIn('not a fault in this app', log)
+
+    def test_prints_the_verification_commands_prefilled(self):
+        # An operator should not have to compose the oracle command under pressure.
+        log = self._run_viewer()
+        self.assertIn('curl -s -o /dev/null', log)
+        self.assertIn(f'http://127.0.0.1:{self.port}/videostream/content/240p/seg-', log)
+        self.assertIn('iperf3 -c 127.0.0.1', log)
+
+    def test_state_is_distinct_from_buffering(self):
+        self._run_viewer()
+        self.assertEqual(self.observed_state, 'link-limited')
+
+    def test_link_limited_viewers_still_count_as_live_in_metrics(self):
+        # Dropping them would make the aggregate describe only the viewers doing well.
+        self._run_viewer()
+        vs_app.config['TESTING'] = True
+        vs_app_module.viewer_stats[1]['state'] = 'link-limited'   # as it was mid-run
+        agg = vs_app.test_client().get('/metrics').get_json()['aggregate']
+        self.assertEqual(agg['viewer_count'], 1)
+        self.assertGreater(agg['avg_bitrate_kbps'], 0)
+
+    def test_needs_several_consecutive_segments(self):
+        # One slow segment is ordinary variance, not a verdict on the link.
+        self.assertGreaterEqual(vs_app_module.LINK_LIMITED_SEGMENTS, 2)
 
 
 class TestPlaylistFetchError(unittest.TestCase):

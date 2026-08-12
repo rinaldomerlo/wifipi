@@ -62,9 +62,9 @@ locally and `/opt/wifipi/.venv` in production. Do not add third-party packages w
 `requests` is used by `video_stream_simulator` alone, and only for its connection pool — one warm
 connection per viewer instead of a fresh one per segment. That is not a tidiness preference: a cold
 connection restarts TCP slow start every segment, which on a high-RTT link caps *measured* throughput
-near 1.3 Mbps at 200 ms RTT regardless of the real link, below the ~1.0 Mbps the ABR needs to justify
-even the 360p rung. A client that reconnects per segment measures its own connection setup instead of
-the WiFi. Everything else stays stdlib.
+near 1.3–1.8 Mbps at 200 ms RTT regardless of the real link, at or below the ~1.0 Mbps the ABR needs to
+justify even the 360p rung. A client that reconnects per segment measures its own connection setup instead
+of the WiFi. Everything else stays stdlib.
 
 ---
 
@@ -159,6 +159,16 @@ while segments get **none** (`SEGMENT_ATTEMPTS = 0`) because a failed segment is
 ABR is written to react to — retrying underneath would delay the rung drop and fold the retry time into the
 throughput estimate driving it. Sessions are per-thread (not thread-safe) and force `Accept-Encoding:
 identity`, since a gzip layer would decouple bytes-counted from bytes-on-the-wire.
+
+**Low throughput and constant rebuffering are usually this app working correctly, not a bug in it.** It
+measures what the link delivered, and a bad WiFi path really does produce 100–200 kbps with stalls every
+segment. Before suspecting the client, cross-check the same target with `curl` and `iperf3` — if a plain
+`curl -w '%{time_total}s %{speed_download} B/s\n'` of one `.ts` segment is equally slow, no client change
+can help. The app now says this itself: `LINK_LIMITED_SEGMENTS` consecutive segments measuring below the
+ladder's bottom rung flips a viewer to the `link-limited` state (distinct from `buffering` in `/metrics`
+and its own pill in the UI) and prints those two commands pre-filled with the actual target. Keep that
+behaviour if you touch the loop — an operator reading a wall of `REBUFFER` lines will otherwise blame the
+tool, which has already cost a full debugging session once.
 
 `reboot_manager` reboots the host (`sudo systemctl reboot`, falling back to `sudo reboot`). Its systemd
 unit runs as **root** by default, same as `client_simulator` and `wifi_porcupine`, so no new sudoers entry

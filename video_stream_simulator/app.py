@@ -80,6 +80,13 @@ PLAYLIST_RETRY_BACKOFF_S = 1.0
 # there's no reason to spend a segment's full patience budget on it.
 CONNECT_TIMEOUT_S = 5
 
+# How many consecutive segments must measure below the ladder's bottom rung before the
+# run is called link-limited. More than one because a single slow segment is ordinary
+# variance; three in a row on a link that cannot even carry the lowest rendition is a
+# statement about the network, and the app should say so in those words rather than
+# leaving an operator to infer it from a wall of REBUFFER lines.
+LINK_LIMITED_SEGMENTS = 3
+
 # Segments deliberately get *no* transport retry. A failed segment is a real streaming
 # event the ABR logic is written to react to -- dropping a rung immediately, as a player
 # would -- and silently retrying underneath would both delay that reaction and fold the
@@ -257,11 +264,20 @@ def make_session(retries: int) -> requests.Session:
     The point is the connection pool underneath: reusing one warm connection across a
     viewer's segments skips a TCP handshake *and* keeps the congestion window, whereas a
     fresh connection per segment restarts slow start every time. On a high-RTT link that
-    difference dominates the measurement -- at 200 ms RTT a ~200 KB segment needs ~6 round
-    trips cold (handshake, request, then four doublings from an initial window of ~14 KB),
-    capping apparent throughput near 1.3 Mbps no matter how fast the link really is. That
-    is below the 1.0 Mbps the ABR needs to justify even the 360p rung, so a cold-connecting
-    client reports a gigabit link as 240p-only.
+    difference dominates the measurement -- at 200 ms RTT a ~200 KB segment needs roughly
+    4.5-5.5 round trips cold (handshake and first byte, then doublings from an initial
+    window of ~14 KB), capping apparent throughput somewhere near 1.3-1.8 Mbps no matter
+    how fast the link really is. That is at or below the 1.0 Mbps the ABR needs to justify
+    even the 360p rung, so a cold-connecting client can report a fast link as 240p-only.
+
+    One caveat on how much credit this deserves: Linux's tcp_slow_start_after_idle (on by
+    default) resets the congestion window after an idle period, and viewers idle by design
+    once the buffer reaches BUFFER_TARGET_S. So on a *healthy* link the kernel re-slow-starts
+    each buffer cycle regardless of this pooling, and the win is concentrated in the
+    continuously-fetching case -- a link too poor to ever fill the buffer, which is exactly
+    when the measurement matters most. Setting net.ipv4.tcp_slow_start_after_idle=0 on both
+    ends would extend the benefit to the healthy case, but that is a host tuning decision
+    and not something this app should impose.
 
     Sessions are not thread-safe, so each viewer thread builds its own.
     """
@@ -502,6 +518,8 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
         buffer_s = 0.0
         playing = False
         bw_est = None
+        below_floor = 0
+        link_limited = False
         seg_index = 0
         session_start = time.time()
         # A per-viewer bias on the buffer target: identical targets would make every
@@ -582,6 +600,35 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
                 (1 - ABR_EWMA_WEIGHT) * bw_est + ABR_EWMA_WEIGHT * throughput_kbps
             )
 
+            # Below the bottom rung there is no rendition left to drop to, so the run has
+            # stopped measuring video quality and started measuring a broken link. Say
+            # that outright: the numbers alone read like a malfunctioning player, and an
+            # operator should not have to work out that the tool is reporting faithfully.
+            # The verdict is computed here (the state below depends on it) but announced
+            # after this segment's own log line, so the line that triggered it reads first.
+            floor_kbps = renditions[0]["bitrate_kbps"]
+            verdict = None
+            if throughput_kbps < floor_kbps:
+                below_floor += 1
+            else:
+                if link_limited:
+                    verdict = (f"{tag}link recovered ({throughput_kbps:.0f} kbps, above the "
+                               f"{floor_kbps} kbps floor).\n")
+                below_floor = 0
+                link_limited = False
+            if below_floor >= LINK_LIMITED_SEGMENTS and not link_limited:
+                link_limited = True
+                verdict = (
+                    f"{tag}LINK-LIMITED: {below_floor} consecutive segments below the "
+                    f"{floor_kbps} kbps needed for the lowest rendition "
+                    f"({renditions[0]['name']}), measured {throughput_kbps:.0f} kbps. "
+                    f"ABR has no lower rung to drop to, so this is a network limit, not a "
+                    f"fault in this app -- it is reporting what the link delivered. "
+                    f"Confirm independently with:\n"
+                    f"{tag}    curl -s -o /dev/null -w '%{{time_total}}s %{{speed_download}} B/s\\n' {seg_url}\n"
+                    f"{tag}    iperf3 -c {target_ip} -t 10\n"
+                )
+
             stats.update({
                 "rendition": rendition["name"],
                 "bitrate_kbps": rendition["bitrate_kbps"],
@@ -589,13 +636,15 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
                 "buffer_s": round(buffer_s, 1),
                 "segments": stats["segments"] + 1,
                 "bytes": stats["bytes"] + nbytes,
-                "state": "playing" if playing else "buffering",
+                "state": "link-limited" if link_limited else ("playing" if playing else "buffering"),
             })
 
             output_queue.put(
                 f"{tag}{rendition['name']} seg{seg_index - 1}: {nbytes / 1024:.0f} KB, "
                 f"{elapsed * 1000:.0f} ms, {throughput_kbps:.0f} kbps, buffer {buffer_s:.1f}s\n"
             )
+            if verdict:
+                output_queue.put(verdict)
 
             if abr_enabled:
                 chosen = select_rendition(renditions, bw_est, current)
@@ -624,6 +673,12 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
             f"totalling {stats['stall_seconds']:.1f}s ({rebuffer_ratio:.2f}% rebuffer ratio), "
             f"{stats['switches']} switch(es).\n"
         )
+        if link_limited:
+            output_queue.put(
+                f"{tag}session ended link-limited: the path to {target_ip} could not carry "
+                f"the {renditions[0]['bitrate_kbps']} kbps bottom rung. Fix the link before "
+                f"reading anything into the QoE numbers above.\n"
+            )
         stats["state"] = "finished"
     except requests.RequestException as e:
         output_queue.put(f"{tag}Error reaching target: {e}\n")
@@ -794,7 +849,9 @@ def metrics():
     total_bytes = sum(v["bytes"] for v in viewers)
     stalls = sum(v["stalls"] for v in viewers)
     stall_seconds = sum(v["stall_seconds"] for v in viewers)
-    live = [v for v in viewers if v["state"] in ("playing", "buffering")] or viewers
+    # "link-limited" counts as live: those viewers are still fetching, and dropping them
+    # would make the aggregate describe only the viewers that happen to be doing well.
+    live = [v for v in viewers if v["state"] in ("playing", "buffering", "link-limited")] or viewers
     avg_bitrate = sum(v["bitrate_kbps"] for v in live) / len(live) if live else 0
     startups = [v["startup_s"] for v in viewers if v["startup_s"] is not None]
 
