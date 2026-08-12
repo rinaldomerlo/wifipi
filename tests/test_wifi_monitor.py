@@ -42,6 +42,16 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
         self.assertIn('host-badge', html)
         self.assertIn(socket.gethostname(), html)
 
+    def test_index_route_has_reboot_link(self):
+        # wifimon has no reboot privileges of its own (sudoers only grants
+        # `iw`) -- the header button must link to the dedicated reboot_manager
+        # app rather than reimplementing any reboot logic here.
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('fa-power-off', html)
+        self.assertIn('../reboot/', html)
+
     def test_api_hostname_route(self):
         # Consumed by the static landing page, which has no backend of its own
         response = self.client.get('/api/hostname')
