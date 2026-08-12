@@ -531,6 +531,64 @@ class TestLinkLimitedDetection(unittest.TestCase):
         self.assertGreaterEqual(vs_app_module.LINK_LIMITED_SEGMENTS, 2)
 
 
+class TestStopBehaviour(unittest.TestCase):
+
+    def setUp(self):
+        vs_app.config['TESTING'] = True
+        self.client = vs_app.test_client()
+        vs_app_module.stop_event.clear()
+        vs_app_module.active_viewers = 0
+        while not vs_app_module.output_queue.empty():
+            vs_app_module.output_queue.get()
+
+    def tearDown(self):
+        vs_app_module.stop_event.clear()
+        vs_app_module.active_viewers = 0
+
+    def _log(self):
+        lines = []
+        while not vs_app_module.output_queue.empty():
+            line = vs_app_module.output_queue.get()
+            if line:
+                lines.append(line)
+        return ''.join(lines)
+
+    def test_sets_the_event_even_before_viewers_register(self):
+        # Threads increment active_viewers themselves, so a Stop in the gap after /start
+        # used to report "no test running" and set nothing, leaving the run going.
+        self.assertEqual(vs_app_module.active_viewers, 0)
+        self.client.post('/stop')
+        self.assertTrue(vs_app_module.stop_event.is_set())
+
+    def test_acknowledges_in_the_live_log(self):
+        # The operator is watching the Live Segment Stream, not the HTTP response.
+        vs_app_module.active_viewers = 3
+        response = self.client.post('/stop')
+        self.assertEqual(response.get_json()['viewers'], 3)
+        log = self._log()
+        self.assertIn('Stop requested', log)
+        self.assertIn('3 viewer(s)', log)
+
+    def test_transfer_aborts_mid_segment(self):
+        # Without this, a Stop lands only after the current read finishes -- up to
+        # SEGMENT_TIMEOUT_S of silence on a bad link.
+        session = vs_app_module.make_session(0)
+        self.addCleanup(session.close)
+        chunks = [b'x' * 65536 for _ in range(50)]
+
+        class _Resp:
+            status_code = 200
+            def raise_for_status(self): pass
+            def iter_content(self, size): return iter(chunks)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        vs_app_module.stop_event.set()
+        with patch.object(session, 'get', return_value=_Resp()):
+            with self.assertRaises(vs_app_module.StopRequested):
+                vs_app_module.fetch(session, 'http://h/240p/seg-0.ts')
+
+
 class TestPlaylistFetchError(unittest.TestCase):
 
     def test_error_names_the_failing_url(self):

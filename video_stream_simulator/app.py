@@ -294,15 +294,34 @@ def make_session(retries: int) -> requests.Session:
     return session
 
 
+class StopRequested(Exception):
+    """Raised inside a transfer when the operator pressed Stop.
+
+    Distinct from a failure so the viewer loop can tell "abandoned on request" apart from
+    "the segment did not arrive", which would otherwise be logged as a link fault and drop
+    a rendition on the way out.
+    """
+
+
 def fetch(session: requests.Session, url: str, timeout: int = SEGMENT_TIMEOUT_S) -> int:
     """GET a URL and return the number of bytes read, discarding the body.
 
     Streamed and counted chunk by chunk rather than buffered whole: a 1080p segment is
     2.5 MB and ten viewers holding one each is memory this app has no reason to spend.
+
+    Chunking also gives Stop somewhere to land. A blocking read on a bad link can sit here
+    for the full SEGMENT_TIMEOUT_S, and a Stop that produces no visible effect for half a
+    minute is indistinguishable from a Stop button that does not work -- so the event is
+    checked between chunks and the transfer abandoned mid-flight.
     """
     with session.get(url, stream=True, timeout=(CONNECT_TIMEOUT_S, timeout)) as resp:
         resp.raise_for_status()
-        return sum(len(chunk) for chunk in resp.iter_content(65536))
+        nbytes = 0
+        for chunk in resp.iter_content(65536):
+            if stop_event.is_set():
+                raise StopRequested()
+            nbytes += len(chunk)
+        return nbytes
 
 
 def fetch_text(session: requests.Session, url: str, timeout: int = PLAYLIST_TIMEOUT_S) -> str:
@@ -563,6 +582,9 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
             t0 = time.time()
             try:
                 nbytes = fetch(segment_session, seg_url)
+            except StopRequested:
+                output_queue.put(f"{tag}stopped mid-segment; abandoning transfer.\n")
+                break
             except Exception as e:
                 # A failed segment is a real streaming event, not a reason to tear the
                 # viewer down: drop a rung (the usual player response to a bad fetch)
@@ -871,10 +893,27 @@ def metrics():
 
 @app.route("/stop", methods=["POST"])
 def stop():
+    """Ask every viewer to wind up, and say so in the live log.
+
+    The event is set unconditionally rather than only when active_viewers > 0. Viewers
+    increment that counter from inside their own threads, so a Stop arriving in the gap
+    between /start returning and those threads being scheduled used to report "no test
+    running" and set nothing -- leaving the run going with the button apparently dead.
+
+    The acknowledgement goes to output_queue rather than only to the HTTP response
+    because the operator is watching the Live Segment Stream, not the network tab: on a
+    slow link a viewer can still be mid-transfer for a moment after this, and silence
+    there is indistinguishable from a broken button.
+    """
+    stop_event.set()
     with test_lock:
-        if active_viewers > 0:
-            stop_event.set()
-            return jsonify({"status": "stopped"})
+        running = active_viewers
+    if running:
+        output_queue.put(
+            f"\nStop requested -- winding up {running} viewer(s); "
+            f"transfers in flight are abandoned.\n"
+        )
+        return jsonify({"status": "stopped", "viewers": running})
     return jsonify({"status": "no test running"})
 
 
