@@ -589,6 +589,85 @@ class TestStopBehaviour(unittest.TestCase):
                 vs_app_module.fetch(session, 'http://h/240p/seg-0.ts')
 
 
+class TestLiveLogFanOut(unittest.TestCase):
+    """Every open /stream connection must see the whole log, not a random share of it."""
+
+    def setUp(self):
+        while not vs_app_module.output_queue.empty():
+            vs_app_module.output_queue.get()
+
+    def test_two_subscribers_both_receive_every_line(self):
+        # The original single-queue design gave each line to exactly one reader, so a
+        # second tab (or a stale EventSource) silently stole half the log.
+        a = vs_app_module.output_queue.subscribe()
+        b = vs_app_module.output_queue.subscribe()
+        self.addCleanup(vs_app_module.output_queue.unsubscribe, a)
+        self.addCleanup(vs_app_module.output_queue.unsubscribe, b)
+
+        for line in ('one\n', 'two\n', 'three\n'):
+            vs_app_module.output_queue.put(line)
+
+        for subscriber in (a, b):
+            self.assertEqual([subscriber.get_nowait() for _ in range(3)],
+                             ['one\n', 'two\n', 'three\n'])
+
+    def test_unsubscribed_reader_stops_receiving(self):
+        a = vs_app_module.output_queue.subscribe()
+        vs_app_module.output_queue.unsubscribe(a)
+        vs_app_module.output_queue.put('after\n')
+        self.assertTrue(a.empty())
+
+    def test_sentinel_reaches_every_subscriber(self):
+        # Each stream ends on its own copy of the sentinel; one used to consume it for all.
+        a = vs_app_module.output_queue.subscribe()
+        b = vs_app_module.output_queue.subscribe()
+        self.addCleanup(vs_app_module.output_queue.unsubscribe, a)
+        self.addCleanup(vs_app_module.output_queue.unsubscribe, b)
+        vs_app_module.output_queue.put(None)
+        self.assertIsNone(a.get_nowait())
+        self.assertIsNone(b.get_nowait())
+
+    def test_backlog_is_capped(self):
+        # Nothing drains the base queue in production; an hour-long run must not bank it.
+        for i in range(vs_app_module.BroadcastQueue.MAX_BACKLOG + 200):
+            vs_app_module.output_queue.put(f'{i}\n')
+        self.assertLessEqual(vs_app_module.output_queue.qsize(),
+                             vs_app_module.BroadcastQueue.MAX_BACKLOG + 1)
+
+
+class TestStartWhileStopping(unittest.TestCase):
+
+    def setUp(self):
+        vs_app.config['TESTING'] = True
+        self.client = vs_app.test_client()
+        vs_app_module.active_viewers = 0
+        vs_app_module.stop_event.clear()
+
+    def tearDown(self):
+        vs_app_module.active_viewers = 0
+        vs_app_module.stop_event.clear()
+
+    def _start(self):
+        return self.client.post('/start', json={
+            "target_ip": "192.168.1.50", "duration_minutes": 1, "intensity": 1})
+
+    def test_says_still_stopping_rather_than_already_running(self):
+        # Reads as a Stop button that failed, when it is a transfer still in flight.
+        vs_app_module.active_viewers = 2
+        vs_app_module.stop_event.set()
+        response = self._start()
+        self.assertEqual(response.status_code, 409)
+        error = response.get_json()['error']
+        self.assertIn('still stopping', error)
+        self.assertIn('2 viewer(s)', error)
+
+    def test_plain_already_running_when_not_stopping(self):
+        vs_app_module.active_viewers = 2
+        response = self._start()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('already running', response.get_json()['error'])
+
+
 class TestPlaylistFetchError(unittest.TestCase):
 
     def test_error_names_the_failing_url(self):

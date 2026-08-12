@@ -102,7 +102,56 @@ DEFAULT_INTENSITY = 2
 stop_event = threading.Event()
 active_viewers = 0
 test_lock = threading.Lock()
-output_queue = queue.Queue()
+
+
+class BroadcastQueue(queue.Queue):
+    """The live log: a queue whose items also reach every open /stream connection.
+
+    This used to be a plain Queue that /stream consumed directly, which meant each line
+    was delivered to exactly *one* reader. A second listener -- another browser tab, an
+    EventSource reconnecting after a run ended, a curl -- silently stole an arbitrary
+    half of the log from the first. Lines went missing with no error anywhere, which is
+    indistinguishable from the app failing to log them, and the Stop acknowledgement was
+    as likely as not to land in a tab nobody was looking at.
+
+    Producers keep calling put(). Readers subscribe() for their own queue and get a full
+    copy of everything published from then on.
+    """
+
+    # Nothing drains the base queue in production any more (subscribers each hold their
+    # own), so cap it rather than let a long run accumulate the whole session in memory.
+    MAX_BACKLOG = 2000
+
+    def __init__(self):
+        super().__init__()
+        self._subscribers: list[queue.Queue] = []
+        self._sub_lock = threading.Lock()
+
+    def put(self, item, *args, **kwargs):
+        super().put(item, *args, **kwargs)
+        while self.qsize() > self.MAX_BACKLOG:
+            try:
+                super().get_nowait()
+            except queue.Empty:
+                break
+        with self._sub_lock:
+            subscribers = list(self._subscribers)
+        for subscriber in subscribers:
+            subscriber.put(item)
+
+    def subscribe(self) -> queue.Queue:
+        subscriber: queue.Queue = queue.Queue()
+        with self._sub_lock:
+            self._subscribers.append(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber: queue.Queue) -> None:
+        with self._sub_lock:
+            if subscriber in self._subscribers:
+                self._subscribers.remove(subscriber)
+
+
+output_queue = BroadcastQueue()
 viewer_stats: dict[int, dict] = {}
 
 
@@ -776,6 +825,15 @@ def scan():
 def start():
     with test_lock:
         if active_viewers > 0:
+            # Distinguish the two cases the operator cannot tell apart from outside: a run
+            # that is genuinely going, versus one already told to stop whose viewers are
+            # still finishing a transfer. The second reads as the Stop button having failed.
+            if stop_event.is_set():
+                return jsonify({"error": (
+                    f"Previous run is still stopping -- {active_viewers} viewer(s) are "
+                    f"finishing a transfer that is already in flight. Try again in a few "
+                    f"seconds."
+                )}), 409
             return jsonify({"error": "A test is already running"}), 409
 
     data = request.json or {}
@@ -919,15 +977,25 @@ def stop():
 
 @app.route("/stream")
 def stream():
+    """Live log as Server-Sent Events, one independent copy per connection.
+
+    Each connection gets its own subscriber queue, so two open tabs both see the whole
+    log instead of racing for individual lines.
+    """
+    subscriber = output_queue.subscribe()
+
     def generate():
-        while True:
-            try:
-                line = output_queue.get(timeout=30)
-                if line is None:
-                    break
-                yield "data: " + line.rstrip("\n").replace("\n", "\\n") + "\n\n"
-            except queue.Empty:
-                yield "data: \n\n"  # keepalive
+        try:
+            while True:
+                try:
+                    line = subscriber.get(timeout=30)
+                    if line is None:
+                        break
+                    yield "data: " + line.rstrip("\n").replace("\n", "\\n") + "\n\n"
+                except queue.Empty:
+                    yield "data: \n\n"  # keepalive
+        finally:
+            output_queue.unsubscribe(subscriber)
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
