@@ -67,6 +67,14 @@ SEGMENT_TIMEOUT_S = 30
 ABR_SAFETY_FACTOR = 0.8
 ABR_EWMA_WEIGHT = 0.3
 
+# Playlist fetching. Playlists are a few hundred bytes, but they cross the same link this
+# app exists to congest -- so a slow one is a symptom to ride out, not a reason to abandon
+# the viewer. Retry with backoff on a longer ceiling than fetch_text's bare default, which
+# was tight enough that one hiccup on a 400-byte request killed a whole session.
+PLAYLIST_TIMEOUT_S = 15
+PLAYLIST_ATTEMPTS = 3
+PLAYLIST_RETRY_BACKOFF_S = 1.0
+
 INTENSITY_RANGE = (1, 10)
 DEFAULT_INTENSITY = 2
 
@@ -243,6 +251,37 @@ def fetch_text(url: str, timeout: int = 10) -> str:
         return resp.read().decode("utf-8", errors="replace")
 
 
+class PlaylistFetchError(Exception):
+    """A playlist that failed every attempt, carrying the URL for the log line.
+
+    Worth its own type purely so the viewer loop can tell "this playlist would not load"
+    apart from a bug, and so the operator is told *which* URL died rather than a bare
+    "timed out" with no indication of what was being fetched.
+    """
+
+    def __init__(self, url: str, attempts: int, last_error: Exception | None):
+        super().__init__(f"{url} failed after {attempts} attempt(s): {last_error}")
+        self.url = url
+        self.last_error = last_error
+
+
+def fetch_playlist(url: str, attempts: int = PLAYLIST_ATTEMPTS) -> str:
+    """GET a playlist, retrying transient failures before giving up.
+
+    Retries wait on stop_event rather than sleeping, so pressing Stop during a backoff
+    doesn't leave the viewer sitting out the full retry budget.
+    """
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        if attempt and stop_event.wait(PLAYLIST_RETRY_BACKOFF_S * attempt):
+            break
+        try:
+            return fetch_text(url, timeout=PLAYLIST_TIMEOUT_S)
+        except Exception as e:
+            last_error = e
+    raise PlaylistFetchError(url, attempts, last_error)
+
+
 def parse_master_playlist(text: str) -> list[dict]:
     """Parse an HLS master playlist into a bitrate-sorted list of renditions.
 
@@ -375,7 +414,14 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
 
         master_url = content_url(target_ip, target_port, "master.m3u8")
         output_queue.put(f"{tag}Fetching master playlist: {master_url}\n")
-        renditions = parse_master_playlist(fetch_text(master_url))
+        try:
+            renditions = parse_master_playlist(fetch_playlist(master_url))
+        except PlaylistFetchError as e:
+            # Fatal, unlike the in-loop failures below: without a ladder there is nothing
+            # to stream. Name the URL so it's clear whether the target is serving at all.
+            output_queue.put(f"{tag}Could not fetch master playlist -- {e}\n")
+            stats["state"] = "error"
+            return
         if not renditions:
             output_queue.put(f"{tag}Target master playlist has no renditions.\n")
             return
@@ -389,7 +435,7 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
             r = renditions[index]
             if r["playlist"] not in playlists:
                 playlists[r["playlist"]] = parse_media_playlist(
-                    fetch_text(content_url(target_ip, target_port, r["playlist"]))
+                    fetch_playlist(content_url(target_ip, target_port, r["playlist"]))
                 )
             return playlists[r["playlist"]]
 
@@ -417,7 +463,25 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
         buffer_target = BUFFER_TARGET_S * random.uniform(0.85, 1.15)
 
         while time.time() < end_time and not stop_event.is_set():
-            segments = segments_for(current)
+            t0 = time.time()
+            try:
+                segments = segments_for(current)
+            except PlaylistFetchError as e:
+                # Same reasoning as a failed segment below: a playlist that won't load is a
+                # link symptom, and this app exists to provoke exactly that. Drop a rung and
+                # keep going -- and let the buffer drain as it really would -- rather than
+                # tearing the viewer down over one unlucky control request.
+                buffer_s, stall_s = _drain(buffer_s, time.time() - t0, playing)
+                if stall_s > 0:
+                    stats["stalls"] += 1
+                    stats["stall_seconds"] += stall_s
+                    output_queue.put(f"{tag}REBUFFER: buffer ran dry for {stall_s:.1f}s\n")
+                output_queue.put(f"{tag}playlist unavailable -- {e}\n")
+                if abr_enabled and current > 0:
+                    current -= 1
+                    stats["switches"] += 1
+                time.sleep(1.0)
+                continue
             if not segments:
                 output_queue.put(f"{tag}Rendition {renditions[current]['name']} has no segments.\n")
                 return
@@ -443,7 +507,7 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
                 if stall_s > 0:
                     stats["stalls"] += 1
                     stats["stall_seconds"] += stall_s
-                output_queue.put(f"{tag}segment failed ({e}); dropping rendition.\n")
+                output_queue.put(f"{tag}segment failed -- {seg_url}: {e}; dropping rendition.\n")
                 if abr_enabled and current > 0:
                     current -= 1
                     stats["switches"] += 1

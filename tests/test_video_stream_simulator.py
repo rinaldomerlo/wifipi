@@ -323,6 +323,62 @@ class TestContentUrl(unittest.TestCase):
         self.assertEqual(url, 'http://192.168.1.10:80/videostream/content/720p/seg-0.ts')
 
 
+class TestPlaylistFetchRetry(unittest.TestCase):
+
+    def setUp(self):
+        vs_app_module.stop_event.clear()
+        # Backoff waits on stop_event, so it costs no real time here -- but keep the
+        # constant tiny anyway so a regression can't turn the suite into a sleep.
+        self._backoff = vs_app_module.PLAYLIST_RETRY_BACKOFF_S
+        vs_app_module.PLAYLIST_RETRY_BACKOFF_S = 0.001
+
+    def tearDown(self):
+        vs_app_module.PLAYLIST_RETRY_BACKOFF_S = self._backoff
+        vs_app_module.stop_event.clear()
+
+    def test_returns_first_success_without_retrying(self):
+        with patch.object(vs_app_module, 'fetch_text', return_value='#EXTM3U') as mock:
+            self.assertEqual(vs_app_module.fetch_playlist('http://h/master.m3u8'), '#EXTM3U')
+        self.assertEqual(mock.call_count, 1)
+
+    def test_retries_a_transient_failure_then_succeeds(self):
+        with patch.object(vs_app_module, 'fetch_text',
+                          side_effect=[TimeoutError('timed out'), '#EXTM3U']) as mock:
+            self.assertEqual(vs_app_module.fetch_playlist('http://h/master.m3u8'), '#EXTM3U')
+        self.assertEqual(mock.call_count, 2)
+
+    def test_gives_up_after_the_attempt_budget(self):
+        with patch.object(vs_app_module, 'fetch_text',
+                          side_effect=TimeoutError('timed out')) as mock:
+            with self.assertRaises(vs_app_module.PlaylistFetchError):
+                vs_app_module.fetch_playlist('http://h/240p/index.m3u8')
+        self.assertEqual(mock.call_count, vs_app_module.PLAYLIST_ATTEMPTS)
+
+    def test_error_names_the_failing_url(self):
+        # The whole point of the type: the log line has to say what could not be fetched.
+        with patch.object(vs_app_module, 'fetch_text', side_effect=TimeoutError('timed out')):
+            with self.assertRaises(vs_app_module.PlaylistFetchError) as ctx:
+                vs_app_module.fetch_playlist('http://192.168.0.180:80/videostream/content/240p/index.m3u8')
+        self.assertEqual(ctx.exception.url,
+                         'http://192.168.0.180:80/videostream/content/240p/index.m3u8')
+        self.assertIn('240p/index.m3u8', str(ctx.exception))
+        self.assertIn('timed out', str(ctx.exception))
+
+    def test_uses_the_longer_playlist_timeout(self):
+        with patch.object(vs_app_module, 'fetch_text', return_value='#EXTM3U') as mock:
+            vs_app_module.fetch_playlist('http://h/master.m3u8')
+        self.assertEqual(mock.call_args.kwargs['timeout'], vs_app_module.PLAYLIST_TIMEOUT_S)
+
+    def test_stop_event_cuts_the_retry_budget_short(self):
+        vs_app_module.stop_event.set()
+        with patch.object(vs_app_module, 'fetch_text',
+                          side_effect=TimeoutError('timed out')) as mock:
+            with self.assertRaises(vs_app_module.PlaylistFetchError):
+                vs_app_module.fetch_playlist('http://h/master.m3u8')
+        # One attempt made, then the backoff wait returns immediately on the set event.
+        self.assertEqual(mock.call_count, 1)
+
+
 class TestMediaGeneration(unittest.TestCase):
 
     def test_nominal_segment_bytes(self):
