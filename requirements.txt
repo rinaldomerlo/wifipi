@@ -1,2 +1,7 @@
 flask>=2.0.0
 gunicorn>=20.1.0
+# video_stream_simulator only: connection pooling. A fresh TCP connection per segment
+# pays a handshake plus TCP slow start every time, which on a high-RTT link caps measured
+# throughput well below the real link and makes the upper ladder rungs unreachable --
+# the client would measure its own connection setup instead of the WiFi.
+requests>=2.25.0

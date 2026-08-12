@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
+import io
 import json
 import os
 import shutil
 import socket
 import sys
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
+
+import requests
 
 # Evict any existing 'app' module to avoid import collision with other Flask apps
 if 'app' in sys.modules:
@@ -323,60 +328,132 @@ class TestContentUrl(unittest.TestCase):
         self.assertEqual(url, 'http://192.168.1.10:80/videostream/content/720p/seg-0.ts')
 
 
-class TestPlaylistFetchRetry(unittest.TestCase):
+class _CountingHandler(BaseHTTPRequestHandler):
+    """Serves a fixed body and counts how many TCP connections were opened.
+
+    One handler instance is constructed per connection, so counting instances counts
+    connections -- which is exactly what the keep-alive behaviour needs to be measured on.
+    """
+
+    protocol_version = 'HTTP/1.1'   # required, or the server closes after every response
+    connections = 0
+    body = b'x' * 4096
+
+    def __init__(self, *args, **kwargs):
+        type(self).connections += 1
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *args):
+        pass
+
+
+class TestSessionTransport(unittest.TestCase):
+    """The transport is the layer that was measuring itself instead of the link."""
 
     def setUp(self):
-        vs_app_module.stop_event.clear()
-        # Backoff waits on stop_event, so it costs no real time here -- but keep the
-        # constant tiny anyway so a regression can't turn the suite into a sleep.
-        self._backoff = vs_app_module.PLAYLIST_RETRY_BACKOFF_S
-        vs_app_module.PLAYLIST_RETRY_BACKOFF_S = 0.001
+        _CountingHandler.connections = 0
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), _CountingHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f'http://127.0.0.1:{self.server.server_address[1]}'
 
     def tearDown(self):
-        vs_app_module.PLAYLIST_RETRY_BACKOFF_S = self._backoff
-        vs_app_module.stop_event.clear()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(5)
 
-    def test_returns_first_success_without_retrying(self):
-        with patch.object(vs_app_module, 'fetch_text', return_value='#EXTM3U') as mock:
-            self.assertEqual(vs_app_module.fetch_playlist('http://h/master.m3u8'), '#EXTM3U')
-        self.assertEqual(mock.call_count, 1)
+    def test_one_session_reuses_a_single_connection(self):
+        # The whole point of the dependency: five segments must not cost five handshakes
+        # and five slow starts, which is what capped throughput on a high-RTT link.
+        session = vs_app_module.make_session(0)
+        try:
+            for i in range(5):
+                vs_app_module.fetch(session, f'{self.base}/seg-{i}.ts')
+        finally:
+            session.close()
+        self.assertEqual(_CountingHandler.connections, 1)
 
-    def test_retries_a_transient_failure_then_succeeds(self):
-        with patch.object(vs_app_module, 'fetch_text',
-                          side_effect=[TimeoutError('timed out'), '#EXTM3U']) as mock:
-            self.assertEqual(vs_app_module.fetch_playlist('http://h/master.m3u8'), '#EXTM3U')
-        self.assertEqual(mock.call_count, 2)
+    def test_a_session_per_request_costs_a_connection_each(self):
+        # Guards the comparison above: the counter really does track connections.
+        for i in range(5):
+            session = vs_app_module.make_session(0)
+            try:
+                vs_app_module.fetch(session, f'{self.base}/seg-{i}.ts')
+            finally:
+                session.close()
+        self.assertEqual(_CountingHandler.connections, 5)
 
-    def test_gives_up_after_the_attempt_budget(self):
-        with patch.object(vs_app_module, 'fetch_text',
-                          side_effect=TimeoutError('timed out')) as mock:
-            with self.assertRaises(vs_app_module.PlaylistFetchError):
-                vs_app_module.fetch_playlist('http://h/240p/index.m3u8')
-        self.assertEqual(mock.call_count, vs_app_module.PLAYLIST_ATTEMPTS)
+    def test_fetch_counts_the_bytes_it_read(self):
+        session = vs_app_module.make_session(0)
+        try:
+            self.assertEqual(vs_app_module.fetch(session, f'{self.base}/seg-0.ts'),
+                             len(_CountingHandler.body))
+        finally:
+            session.close()
+
+    def test_requests_identity_encoding(self):
+        # A gzip layer would decouple bytes-counted from bytes-on-the-wire and skew the
+        # throughput estimate the ABR runs on.
+        session = vs_app_module.make_session(0)
+        self.addCleanup(session.close)
+        self.assertEqual(session.headers['Accept-Encoding'], 'identity')
+
+    def test_segments_get_no_transport_retry(self):
+        # A failed segment must reach the ABR logic immediately so it can drop a rung.
+        self.assertEqual(vs_app_module.SEGMENT_ATTEMPTS, 0)
+        session = vs_app_module.make_session(vs_app_module.SEGMENT_ATTEMPTS)
+        self.addCleanup(session.close)
+        self.assertEqual(session.get_adapter('http://h/').max_retries.total, 0)
+
+    def test_playlists_get_a_retry_budget(self):
+        session = vs_app_module.make_session(vs_app_module.PLAYLIST_ATTEMPTS)
+        self.addCleanup(session.close)
+        retry = session.get_adapter('http://h/').max_retries
+        self.assertEqual(retry.total, vs_app_module.PLAYLIST_ATTEMPTS)
+        self.assertEqual(retry.backoff_factor, vs_app_module.PLAYLIST_RETRY_BACKOFF_S)
+
+
+class TestPlaylistFetchError(unittest.TestCase):
 
     def test_error_names_the_failing_url(self):
         # The whole point of the type: the log line has to say what could not be fetched.
-        with patch.object(vs_app_module, 'fetch_text', side_effect=TimeoutError('timed out')):
+        url = 'http://192.168.0.180:80/videostream/content/240p/index.m3u8'
+        session = vs_app_module.make_session(0)
+        self.addCleanup(session.close)
+        with patch.object(session, 'get',
+                          side_effect=requests.exceptions.ReadTimeout('timed out')):
             with self.assertRaises(vs_app_module.PlaylistFetchError) as ctx:
-                vs_app_module.fetch_playlist('http://192.168.0.180:80/videostream/content/240p/index.m3u8')
-        self.assertEqual(ctx.exception.url,
-                         'http://192.168.0.180:80/videostream/content/240p/index.m3u8')
+                vs_app_module.fetch_playlist(session, url)
+        self.assertEqual(ctx.exception.url, url)
         self.assertIn('240p/index.m3u8', str(ctx.exception))
         self.assertIn('timed out', str(ctx.exception))
 
-    def test_uses_the_longer_playlist_timeout(self):
-        with patch.object(vs_app_module, 'fetch_text', return_value='#EXTM3U') as mock:
-            vs_app_module.fetch_playlist('http://h/master.m3u8')
-        self.assertEqual(mock.call_args.kwargs['timeout'], vs_app_module.PLAYLIST_TIMEOUT_S)
+    def test_uses_split_connect_and_read_timeouts(self):
+        session = vs_app_module.make_session(0)
+        self.addCleanup(session.close)
+        with patch.object(session, 'get') as mock:
+            vs_app_module.fetch_playlist(session, 'http://h/master.m3u8')
+        self.assertEqual(mock.call_args.kwargs['timeout'],
+                         (vs_app_module.CONNECT_TIMEOUT_S, vs_app_module.PLAYLIST_TIMEOUT_S))
 
-    def test_stop_event_cuts_the_retry_budget_short(self):
-        vs_app_module.stop_event.set()
-        with patch.object(vs_app_module, 'fetch_text',
-                          side_effect=TimeoutError('timed out')) as mock:
-            with self.assertRaises(vs_app_module.PlaylistFetchError):
-                vs_app_module.fetch_playlist('http://h/master.m3u8')
-        # One attempt made, then the backoff wait returns immediately on the set event.
-        self.assertEqual(mock.call_count, 1)
+    def test_http_error_status_is_reported_not_parsed(self):
+        # A 404 used to sail through as an empty playlist with no renditions.
+        session = vs_app_module.make_session(0)
+        self.addCleanup(session.close)
+        response = requests.Response()
+        response.status_code = 404
+        response.url = 'http://h/master.m3u8'
+        response.raw = io.BytesIO(b'')   # the context manager closes it on the way out
+        with patch.object(session, 'get', return_value=response):
+            with self.assertRaises(vs_app_module.PlaylistFetchError) as ctx:
+                vs_app_module.fetch_playlist(session, 'http://h/master.m3u8')
+        self.assertIn('404', str(ctx.exception))
 
 
 class TestMediaGeneration(unittest.TestCase):

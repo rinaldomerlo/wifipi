@@ -57,8 +57,14 @@ cd video_stream_simulator && ../.venv/bin/python app.py          # :5012
 Set `VIDEOSTREAM_CONTENT_DIR` to relocate it — the test suite points it at a temp dir so importing the
 app doesn't write a corpus into the working tree.
 
-Dependencies are only `flask` and `gunicorn` (`requirements.txt`). The venv lives at `.venv/` locally and
-`/opt/wifipi/.venv` in production. Do not add third-party packages without asking.
+Dependencies are `flask`, `gunicorn`, and `requests` (`requirements.txt`). The venv lives at `.venv/`
+locally and `/opt/wifipi/.venv` in production. Do not add third-party packages without asking.
+`requests` is used by `video_stream_simulator` alone, and only for its connection pool — one warm
+connection per viewer instead of a fresh one per segment. That is not a tidiness preference: a cold
+connection restarts TCP slow start every segment, which on a high-RTT link caps *measured* throughput
+near 1.3 Mbps at 200 ms RTT regardless of the real link, below the ~1.0 Mbps the ABR needs to justify
+even the 360p rung. A client that reconnects per segment measures its own connection setup instead of
+the WiFi. Everything else stays stdlib.
 
 ---
 
@@ -147,6 +153,12 @@ touch `select_rendition()` (0.8 safety factor, one-rung-at-a-time up, unrestrict
 docstring's rationale intact — each of those three rules exists to prevent a specific artifact. Its nginx
 snippet's `/videostream/content/` alias is load-bearing, not an optimization: several concurrent 1080p
 viewers saturate Flask's worker threads long before the WiFi link, which would measure the wrong thing.
+Each viewer builds two `requests` sessions via `make_session()` with deliberately opposite retry policies:
+playlists retry (`PLAYLIST_ATTEMPTS`) because a slow control request is a congestion symptom to ride out,
+while segments get **none** (`SEGMENT_ATTEMPTS = 0`) because a failed segment is a real streaming event the
+ABR is written to react to — retrying underneath would delay the rung drop and fold the retry time into the
+throughput estimate driving it. Sessions are per-thread (not thread-safe) and force `Accept-Encoding:
+identity`, since a gzip layer would decouple bytes-counted from bytes-on-the-wire.
 
 `reboot_manager` reboots the host (`sudo systemctl reboot`, falling back to `sudo reboot`). Its systemd
 unit runs as **root** by default, same as `client_simulator` and `wifi_porcupine`, so no new sudoers entry

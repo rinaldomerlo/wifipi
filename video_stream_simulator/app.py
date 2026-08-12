@@ -29,9 +29,11 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
+
+import requests
+import requests.adapters
+from urllib3.util.retry import Retry
 
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_from_directory
 
@@ -74,6 +76,15 @@ ABR_EWMA_WEIGHT = 0.3
 PLAYLIST_TIMEOUT_S = 15
 PLAYLIST_ATTEMPTS = 3
 PLAYLIST_RETRY_BACKOFF_S = 1.0
+# Split from the read timeouts: refusing to connect is a fast, unambiguous answer, so
+# there's no reason to spend a segment's full patience budget on it.
+CONNECT_TIMEOUT_S = 5
+
+# Segments deliberately get *no* transport retry. A failed segment is a real streaming
+# event the ABR logic is written to react to -- dropping a rung immediately, as a player
+# would -- and silently retrying underneath would both delay that reaction and fold the
+# retry time into the throughput estimate driving it.
+SEGMENT_ATTEMPTS = 0
 
 INTENSITY_RANGE = (1, 10)
 DEFAULT_INTENSITY = 2
@@ -240,46 +251,75 @@ def content_url(target_ip: str, target_port: int, relative_path: str) -> str:
     return f"http://{target_ip}:{target_port}{prefix}{relative_path}"
 
 
-def fetch(url: str, timeout: int = SEGMENT_TIMEOUT_S) -> int:
-    """GET a URL and return the number of bytes read, discarding the body."""
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return len(resp.read())
+def make_session(retries: int) -> requests.Session:
+    """Build a viewer's HTTP session.
+
+    The point is the connection pool underneath: reusing one warm connection across a
+    viewer's segments skips a TCP handshake *and* keeps the congestion window, whereas a
+    fresh connection per segment restarts slow start every time. On a high-RTT link that
+    difference dominates the measurement -- at 200 ms RTT a ~200 KB segment needs ~6 round
+    trips cold (handshake, request, then four doublings from an initial window of ~14 KB),
+    capping apparent throughput near 1.3 Mbps no matter how fast the link really is. That
+    is below the 1.0 Mbps the ABR needs to justify even the 360p rung, so a cold-connecting
+    client reports a gigabit link as 240p-only.
+
+    Sessions are not thread-safe, so each viewer thread builds its own.
+    """
+    session = requests.Session()
+    # Never let the server compress: these are incompressible random bytes anyway, but a
+    # gzip layer would decouple bytes-on-the-wire from bytes-counted and quietly corrupt
+    # the throughput estimate the ABR runs on.
+    session.headers["Accept-Encoding"] = "identity"
+    adapter = requests.adapters.HTTPAdapter(
+        max_retries=Retry(total=retries, backoff_factor=PLAYLIST_RETRY_BACKOFF_S,
+                          status_forcelist=[502, 503, 504], allowed_methods=["GET"])
+    )
+    session.mount("http://", adapter)
+    return session
 
 
-def fetch_text(url: str, timeout: int = 10) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+def fetch(session: requests.Session, url: str, timeout: int = SEGMENT_TIMEOUT_S) -> int:
+    """GET a URL and return the number of bytes read, discarding the body.
+
+    Streamed and counted chunk by chunk rather than buffered whole: a 1080p segment is
+    2.5 MB and ten viewers holding one each is memory this app has no reason to spend.
+    """
+    with session.get(url, stream=True, timeout=(CONNECT_TIMEOUT_S, timeout)) as resp:
+        resp.raise_for_status()
+        return sum(len(chunk) for chunk in resp.iter_content(65536))
+
+
+def fetch_text(session: requests.Session, url: str, timeout: int = PLAYLIST_TIMEOUT_S) -> str:
+    with session.get(url, timeout=(CONNECT_TIMEOUT_S, timeout)) as resp:
+        resp.raise_for_status()
+        return resp.text
 
 
 class PlaylistFetchError(Exception):
-    """A playlist that failed every attempt, carrying the URL for the log line.
+    """A playlist that would not load, carrying the URL for the log line.
 
     Worth its own type purely so the viewer loop can tell "this playlist would not load"
     apart from a bug, and so the operator is told *which* URL died rather than a bare
     "timed out" with no indication of what was being fetched.
     """
 
-    def __init__(self, url: str, attempts: int, last_error: Exception | None):
-        super().__init__(f"{url} failed after {attempts} attempt(s): {last_error}")
+    def __init__(self, url: str, cause: Exception):
+        super().__init__(f"{url}: {cause}")
         self.url = url
-        self.last_error = last_error
+        self.cause = cause
 
 
-def fetch_playlist(url: str, attempts: int = PLAYLIST_ATTEMPTS) -> str:
-    """GET a playlist, retrying transient failures before giving up.
+def fetch_playlist(session: requests.Session, url: str) -> str:
+    """GET a playlist, translating any transport failure into a URL-bearing error.
 
-    Retries wait on stop_event rather than sleeping, so pressing Stop during a backoff
-    doesn't leave the viewer sitting out the full retry budget.
+    The retrying happens a layer down, in the session's Retry policy -- playlists are
+    tiny but cross the same link this app exists to congest, so a slow one is a symptom
+    to ride out rather than a reason to abandon the viewer.
     """
-    last_error: Exception | None = None
-    for attempt in range(attempts):
-        if attempt and stop_event.wait(PLAYLIST_RETRY_BACKOFF_S * attempt):
-            break
-        try:
-            return fetch_text(url, timeout=PLAYLIST_TIMEOUT_S)
-        except Exception as e:
-            last_error = e
-    raise PlaylistFetchError(url, attempts, last_error)
+    try:
+        return fetch_text(session, url)
+    except requests.RequestException as e:
+        raise PlaylistFetchError(url, e) from e
 
 
 def parse_master_playlist(text: str) -> list[dict]:
@@ -404,6 +444,12 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
     with test_lock:
         viewer_stats[viewer_id] = stats
 
+    # Two sessions because they want opposite retry policies (see SEGMENT_ATTEMPTS), and
+    # one set per thread because requests sessions are not thread-safe. Playlists are
+    # fetched once per rendition and then cached, so the second connection costs little.
+    playlist_session = make_session(PLAYLIST_ATTEMPTS)
+    segment_session = make_session(SEGMENT_ATTEMPTS)
+
     try:
         # Stagger viewers so a high intensity doesn't fire every first request in the
         # same millisecond -- real viewers don't press play simultaneously, and the
@@ -415,7 +461,7 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
         master_url = content_url(target_ip, target_port, "master.m3u8")
         output_queue.put(f"{tag}Fetching master playlist: {master_url}\n")
         try:
-            renditions = parse_master_playlist(fetch_playlist(master_url))
+            renditions = parse_master_playlist(fetch_playlist(playlist_session, master_url))
         except PlaylistFetchError as e:
             # Fatal, unlike the in-loop failures below: without a ladder there is nothing
             # to stream. Name the URL so it's clear whether the target is serving at all.
@@ -435,7 +481,8 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
             r = renditions[index]
             if r["playlist"] not in playlists:
                 playlists[r["playlist"]] = parse_media_playlist(
-                    fetch_playlist(content_url(target_ip, target_port, r["playlist"]))
+                    fetch_playlist(playlist_session,
+                                   content_url(target_ip, target_port, r["playlist"]))
                 )
             return playlists[r["playlist"]]
 
@@ -497,7 +544,7 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
 
             t0 = time.time()
             try:
-                nbytes = fetch(seg_url)
+                nbytes = fetch(segment_session, seg_url)
             except Exception as e:
                 # A failed segment is a real streaming event, not a reason to tear the
                 # viewer down: drop a rung (the usual player response to a bad fetch)
@@ -578,13 +625,15 @@ def run_viewer_loop(viewer_id: int, target_ip: str, target_port: int,
             f"{stats['switches']} switch(es).\n"
         )
         stats["state"] = "finished"
-    except urllib.error.URLError as e:
+    except requests.RequestException as e:
         output_queue.put(f"{tag}Error reaching target: {e}\n")
         stats["state"] = "error"
     except Exception as e:
         output_queue.put(f"{tag}Error: {e}\n")
         stats["state"] = "error"
     finally:
+        playlist_session.close()
+        segment_session.close()
         with test_lock:
             active_viewers -= 1
             all_done = active_viewers == 0
