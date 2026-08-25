@@ -133,6 +133,7 @@ def parse_bss_block(header_line, body_lines):
     record = {
         'bssid': m.group('bssid').lower(),
         'interface': m.group('interface'),
+        'associated': bool(re.search(r'--\s*associated\b', header_line, re.IGNORECASE)),
     }
 
     body_text = '\n'.join(body_lines)

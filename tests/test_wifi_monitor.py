@@ -145,6 +145,107 @@ class TestWifiUtilizationMonitor(unittest.TestCase):
 
         self.assertEqual(mock_scan.call_count, 2)
 
+    def test_scan_rejected_when_interface_connected(self):
+        # The Pi must not be connected to any WiFi network while monitoring utilization.
+        conn_info = {'connected': True, 'ssid': 'TestNet', 'bssid': '00:11:22:33:44:55', 'interface': 'wlan0'}
+        with patch('wifi_utilization_monitor.app.find_connected_wifi', return_value=conn_info), \
+             patch('wifi_utilization_monitor.app.run_live_scan') as mock_scan:
+            response = self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertFalse(data['success'])
+            self.assertIn('connected', data['error'].lower())
+            self.assertIn('disconnect', data['error'].lower())
+            mock_scan.assert_not_called()
+
+    def test_scan_rejected_when_other_interface_connected(self):
+        conn_info = {'connected': True, 'ssid': 'AlfaAlfa', 'bssid': 'a0:55:1f:d7:a7:7c', 'interface': 'wlan1'}
+        with patch('wifi_utilization_monitor.app.find_connected_wifi', return_value=conn_info), \
+             patch('wifi_utilization_monitor.app.run_live_scan') as mock_scan:
+            response = self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertFalse(data['success'])
+            self.assertIn('wlan1', data['error'])
+            self.assertIn('AlfaAlfa', data['error'])
+            mock_scan.assert_not_called()
+
+    def test_scan_rejected_when_scan_output_shows_associated(self):
+        associated_scan_output = """BSS a0:55:1f:d7:a7:7c(on wlan0) -- associated
+\tfreq: 5540
+\tsignal: -44.00 dBm
+\tSSID: AlfaAlfa
+"""
+        with patch('wifi_utilization_monitor.app.find_connected_wifi', return_value=None), \
+             patch('wifi_utilization_monitor.app.run_live_scan', return_value=(associated_scan_output, None)):
+            response = self.client.get('/api/scan?interface=wlan0')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertFalse(data['success'])
+            self.assertIn('associated', data['error'].lower())
+
+    def test_get_interface_connection_parsing(self):
+        link_output = b"""Connected to a0:55:1f:d7:a7:7c (on wlan0)
+\tSSID: AlfaAlfa
+\tfreq: 5540
+\tRX: 12345 bytes
+\tTX: 54321 bytes
+\tsignal: -44 dBm
+"""
+        with patch('shutil.which', return_value='/sbin/iw'), \
+             patch('subprocess.check_output', return_value=link_output):
+            conn = wifi_app_module.get_interface_connection('wlan0')
+            self.assertTrue(conn['connected'])
+            self.assertEqual(conn['bssid'], 'a0:55:1f:d7:a7:7c')
+            self.assertEqual(conn['ssid'], 'AlfaAlfa')
+
+        not_connected_output = b"Not connected.\n"
+        with patch('shutil.which', return_value='/sbin/iw'), \
+             patch('subprocess.check_output', return_value=not_connected_output):
+            conn = wifi_app_module.get_interface_connection('wlan0')
+            self.assertFalse(conn['connected'])
+            self.assertIsNone(conn['bssid'])
+            self.assertIsNone(conn['ssid'])
+
+    def test_index_contains_shutdown_and_connection_alert(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('Shutdown', html)
+        self.assertIn('fa-power-off', html)
+        self.assertIn('id="connectionAlert"', html)
+        self.assertIn('disconnectWiFi()', html)
+
+    def test_api_disconnect_success(self):
+        with patch('wifi_utilization_monitor.app.disconnect_wifi_interface', return_value=(True, "Disconnected interface wlan0.")):
+            response = self.client.post('/api/disconnect', json={'interface': 'wlan0'})
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertTrue(data['success'])
+            self.assertIn('disconnected', data['message'].lower())
+
+    def test_api_disconnect_failure(self):
+        with patch('wifi_utilization_monitor.app.disconnect_wifi_interface', return_value=(False, "Could not disconnect")):
+            response = self.client.post('/api/disconnect', json={'interface': 'wlan0'})
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertFalse(data['success'])
+            self.assertIn('could not disconnect', data['error'].lower())
+
+    def test_disconnect_wifi_interface_logic(self):
+        with patch('platform.system', return_value='Linux'), \
+             patch('shutil.which', side_effect=lambda cmd: f"/usr/bin/{cmd}"), \
+             patch('os.geteuid', return_value=1000), \
+             patch('subprocess.run') as mock_run, \
+             patch('wifi_utilization_monitor.app.get_interface_connection', return_value={'connected': False, 'interface': 'wlan0'}):
+            ok, msg = wifi_app_module.disconnect_wifi_interface('wlan0')
+            self.assertTrue(ok)
+            self.assertIn('wlan0', msg)
+            # Verify nmcli and iw were called
+            cmds = [call.args[0] for call in mock_run.call_args_list]
+            self.assertTrue(any('nmcli' in cmd for cmd in cmds))
+            self.assertTrue(any('iw' in cmd for cmd in cmds))
+
 
 if __name__ == '__main__':
     unittest.main()

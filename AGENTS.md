@@ -33,11 +33,13 @@ Project Root Structure:
 
 ### A. WiFi Channel & Utilization Monitor (`wifi_utilization_monitor`)
 - **Purpose**: Visualizes live WiFi channel utilization, spectrum coverage across **2.4 GHz, 5 GHz, and 6 GHz** bands, and BSS scanning results.
-- **Backend (`app.py`, `parser.py`)**: Executes wireless scan commands and parses raw output.
-- **System Privilege Requirement**: Performs live scans via `sudo iw dev <interface> scan`. 
+- **Connection Constraint & Disconnect Option**: The Pi must not be connected/associated to any WiFi network while running the monitor, so active station traffic or channel pinning does not bias the scan or utilization measurements. The backend enforces this by checking `iw dev <iface> link` across all wireless interfaces and rejecting scan requests if any active connection is present. When an active connection is detected, the UI presents an interactive connection alert banner offering a one-click **Disconnect WiFi** action (via `POST /api/disconnect`), which tears down the connection using `nmcli` / `iw` and immediately triggers a fresh scan.
+- **Header Controls**: Includes navigation links to the landing page, Reboot Host, and Shutdown Host (`/reboot/`).
+- **Backend (`app.py`, `parser.py`)**: Executes wireless scan commands, connection checks, interface disconnects, and parses raw output.
+- **System Privilege Requirement**: Performs live scans via `sudo iw dev <interface> scan` and disconnects via `sudo iw dev <interface> disconnect` / `sudo nmcli device disconnect <interface>`. 
   - *Sudoers Rule*: Requires passwordless sudo configuration for the local app user (e.g. `jenkins` or `pi`):
     ```text
-    <username> ALL=(ALL) NOPASSWD: /usr/sbin/iw
+    <username> ALL=(ALL) NOPASSWD: /usr/sbin/iw, /usr/bin/nmcli
     ```
 - **Frontend (`static/js/app.js`, `templates/index.html`)**:
   - Configurable refresh rate options (3s, 5s, 10s, 30s, 1m, 2m, 5m, manual) — a live scan
@@ -392,32 +394,32 @@ Project Root Structure:
   `iperf_congestion_generator` — see section B.
 
 ### L. Reboot Manager (`reboot_manager`)
-- **Purpose**: The one app whose entire job is to take the host down. Shows uptime and platform, and
-  reboots this Pi (`sudo systemctl reboot`, falling back to `sudo reboot` if `systemctl` isn't on PATH)
-  from a single confirmed action.
-- **Confirmation is layered, not single-point**: the browser UI swaps the reboot button for an inline,
+- **Purpose**: The app whose job is system power management. Shows uptime and platform, and
+  triggers a confirmed reboot (`sudo systemctl reboot`, falling back to `sudo reboot`) or complete power
+  shutdown (`sudo systemctl poweroff`, falling back to `sudo poweroff` / `sudo shutdown -h now`) of this Pi.
+- **Confirmation is layered, not single-point**: the browser UI swaps the action buttons for an inline,
   cancellable 5-second countdown bar rather than firing immediately or using a blocking native `confirm()`
   (which the other apps use for less consequential actions like killing one iperf3 PID). The countdown
-  auto-POSTs `/api/reboot` with `{"confirm": "REBOOT"}` when it reaches zero unless cancelled. The API
-  independently rejects any request missing that exact token, so a stray or scripted POST — bypassing the
-  UI entirely — can't take the host down by accident.
-- **The reboot itself runs from a background thread** (`_do_reboot`), started after the route returns
-  `202`, with a short (`REBOOT_DELAY_SECONDS`) sleep before the actual command runs. This exists solely so
-  the HTTP response has time to flush to the client before the process — and the whole host — goes down;
-  without it, the client can be left hanging on a connection that never completes.
-- **`reboot_state["pending"]`**, guarded by `reboot_lock`, rejects a second `/api/reboot` call (`409`)
-  while one is already in flight. Gunicorn is configured `--workers 1` for this app specifically so that
-  in-process guard actually holds across every request, the same reasoning as the WiFi Monitor's
-  single-worker scan lock.
-- **After a successful trigger**, the page hides the action card and polls `GET /api/hostname` every 4s
-  (after an initial 8s grace period so it doesn't catch the host still up and declare victory early) until
-  it answers again, then reports "back online" with a reload link — useful feedback since the browser tab
-  itself goes dark for the duration.
-- **System Privilege Requirement**: needs only `systemctl` (or `reboot`) on PATH. The unit runs as **root**
-  by default like `client_simulator` and `wifi_porcupine`, so **no new sudoers entry** is required
-  (commands still go via `sudo`, a no-op under root). Refuses up front off-Linux or without a reboot
+  auto-POSTs `/api/reboot` with `{"confirm": "REBOOT"}` or `/api/shutdown` with `{"confirm": "SHUTDOWN"}` when
+  it reaches zero unless cancelled. The API independently rejects any request missing that exact token, so a
+  stray or scripted POST — bypassing the UI entirely — can't take the host down by accident.
+- **The reboot/shutdown itself runs from a background thread** (`_do_reboot` / `_do_shutdown`), started after
+  the route returns `202`, with a short (`REBOOT_DELAY_SECONDS`) sleep before the actual command runs. This
+  exists solely so the HTTP response has time to flush to the client before the process — and the whole host —
+  goes down; without it, the client can be left hanging on a connection that never completes.
+- **`power_state["pending"]`** (aliased to `reboot_state["pending"]`), guarded by `power_lock` (`reboot_lock`),
+  rejects a second power trigger (`409`) while one is already in flight. Gunicorn is configured `--workers 1`
+  for this app specifically so that in-process guard actually holds across every request, the same reasoning as
+  the WiFi Monitor's single-worker scan lock.
+- **After a successful trigger**, the page hides the action card. For reboot, it polls `GET /api/hostname`
+  every 4s (after an initial 8s grace period so it doesn't catch the host still up and declare victory early)
+  until it answers again, then reports "back online" with a reload link; for shutdown, it confirms the host is
+  powering down and will remain offline until manually powered back on.
+- **System Privilege Requirement**: needs only `systemctl` (or `reboot`/`poweroff`/`shutdown`) on PATH. The
+  unit runs as **root** by default like `client_simulator` and `wifi_porcupine`, so **no new sudoers entry**
+  is required (commands still go via `sudo`, a no-op under root). Refuses up front off-Linux or without a power
   mechanism on PATH, returning a clear JSON error — critical here specifically, since the alternative on a
-  macOS dev machine would be either a crash or, worse, actually rebooting the developer's laptop.
+  macOS dev machine would be either a crash or, worse, actually rebooting/shutting down the developer's laptop.
 
 ---
 

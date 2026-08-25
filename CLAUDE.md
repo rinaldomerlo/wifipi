@@ -39,18 +39,7 @@ Only `wifi_utilization_monitor` has separate `static/` assets and a `parser.py`.
 .venv/bin/python -m unittest discover -s tests
 
 # Run a single app in dev mode (from its own directory, so templates resolve)
-cd wifi_utilization_monitor && ../.venv/bin/python app.py        # :5000
-cd iperf_congestion_generator && ../.venv/bin/python app.py      # :5001
-cd iperf_server_manager && ../.venv/bin/python app.py            # :5002
-cd wifi_connection_manager && ../.venv/bin/python app.py         # :5003
-cd web_browsing_simulator && ../.venv/bin/python app.py          # :5004
-cd client_simulator && ../.venv/bin/python app.py                # :5005
-cd network_device_scanner && ../.venv/bin/python app.py          # :5006
-cd roaming_monitor && ../.venv/bin/python app.py                 # :5007
-cd web_terminal && ../.venv/bin/python app.py                    # :5008
-cd wifi_porcupine && ../.venv/bin/python app.py                  # :5010
-cd reboot_manager && ../.venv/bin/python app.py                  # :5011
-cd video_stream_simulator && ../.venv/bin/python app.py          # :5012
+cd <app_dir> && ../.venv/bin/python app.py    # ports are in the Repository Layout table above
 ```
 
 `video_stream_simulator` generates a ~62 MB HLS ladder into its `content/` (gitignored) on first start.

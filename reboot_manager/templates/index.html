@@ -304,6 +304,18 @@
             box-shadow: 0 6px 16px rgba(255, 59, 116, 0.35);
         }
 
+        .btn-dark-red {
+            background: linear-gradient(135deg, #c2185b 0%, #7b1fa2 100%);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(194, 24, 91, 0.25);
+        }
+
+        .btn-dark-red:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(194, 24, 91, 0.45);
+        }
+
         .btn-ghost {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--glass-border);
@@ -406,30 +418,36 @@
                 <span id="stat-platform" class="stat-value" style="font-size: 1.1rem;">&mdash;</span>
             </div>
             <div class="stat-box">
-                <span class="stat-label"><i class="fa-solid fa-shield-halved"></i> Reboot Capability</span>
+                <span class="stat-label"><i class="fa-solid fa-shield-halved"></i> Power Control</span>
                 <span id="stat-capability" class="badge badge-inactive">Checking&hellip;</span>
             </div>
         </div>
 
-        <!-- Reboot Action -->
+        <!-- Power Actions -->
         <div class="glass-card">
             <div class="card-header-title">
-                <h2><i class="fa-solid fa-power-off"></i> Reboot This Host</h2>
+                <h2><i class="fa-solid fa-power-off"></i> System Power Control</h2>
             </div>
 
             <div id="action-area">
                 <p class="warn-text">
-                    This restarts <strong>{{ hostname }}</strong> immediately. Every WiFiPi tool running on
-                    this host — including this page — will be unreachable for roughly a minute while it
-                    comes back up. Any in-progress test runs are lost.
+                    Trigger a confirmed reboot or complete power shutdown of <strong>{{ hostname }}</strong>.
+                    Every WiFiPi tool running on this host — including this page — will be unreachable.
+                    A <strong>reboot</strong> restarts the host in ~1 minute. A <strong>shutdown</strong> completely
+                    powers off the hardware until manually turned back on.
                 </p>
 
-                <button id="reboot-btn" class="btn btn-red" onclick="startCountdown()">
-                    <i class="fa-solid fa-power-off"></i> Reboot Pi
-                </button>
+                <div id="btn-group" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                    <button id="reboot-btn" class="btn btn-red" onclick="startCountdown('reboot')">
+                        <i class="fa-solid fa-rotate"></i> Reboot Pi
+                    </button>
+                    <button id="shutdown-btn" class="btn btn-dark-red" onclick="startCountdown('shutdown')">
+                        <i class="fa-solid fa-power-off"></i> Shutdown Pi
+                    </button>
+                </div>
 
                 <div id="confirm-bar">
-                    <span class="confirm-msg">Rebooting in <strong id="countdown-num">5</strong>s&hellip;</span>
+                    <span class="confirm-msg" id="confirm-msg"><span id="action-label">Rebooting</span> in <strong id="countdown-num">5</strong>s&hellip;</span>
                     <button class="btn btn-ghost" onclick="cancelCountdown()">
                         <i class="fa-solid fa-xmark"></i> Cancel
                     </button>
@@ -441,7 +459,7 @@
             <div id="result-panel">
                 <i class="fa-solid fa-rotate fa-spin" id="result-icon"></i>
                 <div id="result-title" style="font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700;">
-                    Reboot initiated
+                    Power action initiated
                 </div>
                 <p id="result-detail">Waiting for {{ hostname }} to come back online&hellip;</p>
             </div>
@@ -449,10 +467,10 @@
     </div>
 
     <script>
-        const CONFIRM_TOKEN = 'REBOOT';
         const COUNTDOWN_SECONDS = 5;
         let countdownTimer = null;
         let countdownRemaining = COUNTDOWN_SECONDS;
+        let activeAction = null;
 
         async function fetchStatus() {
             try {
@@ -463,18 +481,23 @@
                 document.getElementById('stat-platform').textContent = data.platform || 'unknown';
 
                 const cap = document.getElementById('stat-capability');
-                if (data.can_reboot) {
+                const rebootBtn = document.getElementById('reboot-btn');
+                const shutdownBtn = document.getElementById('shutdown-btn');
+
+                if (data.can_reboot || data.can_shutdown) {
                     cap.textContent = 'Available';
                     cap.className = 'badge badge-active';
-                    document.getElementById('reboot-btn').disabled = false;
+                    rebootBtn.disabled = !data.can_reboot;
+                    shutdownBtn.disabled = !data.can_shutdown;
                 } else {
                     cap.textContent = 'Unavailable';
                     cap.className = 'badge badge-inactive';
-                    document.getElementById('reboot-btn').disabled = true;
+                    rebootBtn.disabled = true;
+                    shutdownBtn.disabled = true;
                     if (data.reason) {
                         const msg = document.getElementById('status-msg');
                         msg.style.display = 'block';
-                        msg.textContent = 'Reboot is unavailable on this host: ' + data.reason + '.';
+                        msg.textContent = 'Power management is unavailable on this host: ' + data.reason + '.';
                     }
                 }
             } catch (e) {
@@ -482,10 +505,12 @@
             }
         }
 
-        function startCountdown() {
+        function startCountdown(action) {
+            activeAction = action;
             countdownRemaining = COUNTDOWN_SECONDS;
             document.getElementById('countdown-num').textContent = countdownRemaining;
-            document.getElementById('reboot-btn').style.display = 'none';
+            document.getElementById('action-label').textContent = action === 'shutdown' ? 'Shutting down' : 'Rebooting';
+            document.getElementById('btn-group').style.display = 'none';
             document.getElementById('confirm-bar').classList.add('show');
 
             countdownTimer = setInterval(() => {
@@ -493,7 +518,7 @@
                 if (countdownRemaining <= 0) {
                     clearInterval(countdownTimer);
                     countdownTimer = null;
-                    triggerReboot();
+                    triggerAction(activeAction);
                     return;
                 }
                 document.getElementById('countdown-num').textContent = countdownRemaining;
@@ -505,41 +530,67 @@
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
+            activeAction = null;
             document.getElementById('confirm-bar').classList.remove('show');
-            document.getElementById('reboot-btn').style.display = 'inline-flex';
+            document.getElementById('btn-group').style.display = 'flex';
         }
 
-        async function triggerReboot() {
+        async function triggerAction(action) {
             document.getElementById('confirm-bar').classList.remove('show');
 
+            const isShutdown = action === 'shutdown';
+            const endpoint = isShutdown ? 'api/shutdown' : 'api/reboot';
+            const token = isShutdown ? 'SHUTDOWN' : 'REBOOT';
+
             try {
-                const res = await fetch('api/reboot', {
+                const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm: CONFIRM_TOKEN })
+                    body: JSON.stringify({ confirm: token })
                 });
                 const data = await res.json();
 
                 if (res.ok) {
-                    showResultPanel();
-                    pollForReturn();
+                    showResultPanel(action);
+                    if (!isShutdown) {
+                        pollForReturn();
+                    }
                 } else {
                     const msg = document.getElementById('status-msg');
                     msg.style.display = 'block';
-                    msg.textContent = data.error || 'Reboot request failed.';
-                    document.getElementById('reboot-btn').style.display = 'inline-flex';
+                    msg.textContent = data.error || `${action} request failed.`;
+                    document.getElementById('btn-group').style.display = 'flex';
                 }
             } catch (e) {
-                // A fetch error here can just as easily mean the host already went down --
-                // treat it the same as a successful trigger and start watching for it to return.
-                showResultPanel();
-                pollForReturn();
+                // A fetch error here can mean the host already went down --
+                // treat it as successful trigger.
+                showResultPanel(action);
+                if (!isShutdown) {
+                    pollForReturn();
+                }
             }
         }
 
-        function showResultPanel() {
+        function showResultPanel(action) {
             document.getElementById('action-area').classList.add('hidden');
-            document.getElementById('result-panel').classList.add('show');
+            const panel = document.getElementById('result-panel');
+            const title = document.getElementById('result-title');
+            const detail = document.getElementById('result-detail');
+            const icon = document.getElementById('result-icon');
+
+            if (action === 'shutdown') {
+                icon.className = 'fa-solid fa-power-off';
+                icon.style.color = 'var(--color-pink)';
+                title.textContent = 'Shutdown initiated';
+                detail.textContent = 'This host is powering down. It will remain offline until manually powered back on.';
+            } else {
+                icon.className = 'fa-solid fa-rotate fa-spin';
+                icon.style.color = 'var(--color-orange)';
+                title.textContent = 'Reboot initiated';
+                detail.textContent = 'Waiting for {{ hostname }} to come back online\u2026';
+            }
+
+            panel.classList.add('show');
         }
 
         function pollForReturn() {
@@ -550,6 +601,7 @@
                         const panel = document.getElementById('result-panel');
                         panel.classList.add('online');
                         document.getElementById('result-icon').className = 'fa-solid fa-circle-check';
+                        document.getElementById('result-icon').style.color = 'var(--color-green)';
                         document.getElementById('result-title').textContent = 'Back online';
                         document.getElementById('result-detail').innerHTML =
                             'This host has come back up. <a href="javascript:location.reload()" style="color: var(--color-blue);">Reload the page</a>.';
@@ -560,8 +612,7 @@
                 }
                 setTimeout(check, 4000);
             };
-            // Give the host a moment to actually go down before probing, so the very
-            // first check doesn't just catch it still up and declare victory early.
+            // Give the host a moment to actually go down before probing
             setTimeout(check, 8000);
         }
 

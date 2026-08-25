@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import os
+import platform
+import re
+import shutil
 import sys
 import socket
 import subprocess
@@ -47,6 +50,16 @@ def get_scan_result(interface):
     cached -- a transient failure shouldn't be pinned for other viewers or
     for the caller's own next retry.
     """
+    conn = find_connected_wifi(interface)
+    if conn and conn.get('connected'):
+        ssid_label = f" '{conn['ssid']}'" if conn.get('ssid') else " (Hidden SSID)"
+        bssid_label = f" [{conn['bssid']}]" if conn.get('bssid') else ""
+        return None, (
+            f"Wireless interface {conn['interface']} is currently connected to WiFi network{ssid_label}{bssid_label}. "
+            f"The Pi must not be connected to any WiFi network while running WiFi Utilization Monitor. "
+            f"Please disconnect from WiFi before scanning."
+        )
+
     cached = _scan_cache.get(interface)
     if cached and (time.monotonic() - cached['ts']) < SCAN_CACHE_TTL_SECONDS:
         return cached['raw'], cached['error']
@@ -104,6 +117,112 @@ def get_wireless_interfaces():
             pass
 
     return interfaces
+
+def get_interface_connection(interface):
+    """Check if `interface` is currently connected/associated to a WiFi network.
+    
+    Runs `iw dev <interface> link`.
+    Returns a dict: {'connected': bool, 'ssid': str|None, 'bssid': str|None, 'interface': interface}.
+    """
+    res = {'connected': False, 'ssid': None, 'bssid': None, 'interface': interface}
+    if not shutil.which('iw') or not interface:
+        return res
+    try:
+        output = subprocess.check_output(
+            ['iw', 'dev', interface, 'link'],
+            stderr=subprocess.DEVNULL,
+            timeout=3
+        ).decode('utf-8', errors='replace')
+    except Exception:
+        return res
+
+    match = re.search(r'Connected to ([0-9a-fA-F:]{17})', output, re.IGNORECASE)
+    if match:
+        res['connected'] = True
+        res['bssid'] = match.group(1).lower()
+        ssid_match = re.search(r'^\s*SSID:\s*(.+)$', output, re.MULTILINE)
+        if ssid_match:
+            res['ssid'] = ssid_match.group(1).strip()
+    return res
+
+def find_connected_wifi(target_interface=None):
+    """Check if the target interface or any wireless interface is currently connected.
+    
+    Returns the connection dict if connected, or None if no interface is connected.
+    """
+    if target_interface:
+        conn = get_interface_connection(target_interface)
+        if conn.get('connected'):
+            return conn
+
+    for iface in get_wireless_interfaces():
+        if iface != target_interface:
+            conn = get_interface_connection(iface)
+            if conn.get('connected'):
+                return conn
+    return None
+
+def disconnect_wifi_interface(interface):
+    """Disconnect a wireless interface from any active association.
+    
+    Tries NetworkManager `nmcli` first (if available) to release the connection,
+    and `sudo iw dev <iface> disconnect`.
+    Returns (success: bool, message_or_error: str).
+    """
+    if not interface:
+        return False, "No interface specified."
+
+    # In non-Linux environment (e.g. macOS dev) without wireless tools
+    if platform.system() != "Linux" and not shutil.which('iw') and not shutil.which('nmcli'):
+        _scan_cache.clear()
+        return True, f"Simulated disconnect on {interface}."
+
+    errors = []
+    
+    # 1. Try nmcli if available (managed connection disconnect)
+    if shutil.which('nmcli'):
+        try:
+            cmd = ['nmcli', 'device', 'disconnect', interface]
+            if shutil.which('sudo') and os.geteuid() != 0:
+                cmd = ['sudo'] + cmd
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if res.returncode != 0 and res.stderr:
+                errors.append(f"nmcli: {res.stderr.strip()}")
+        except Exception as e:
+            errors.append(f"nmcli error: {e}")
+
+    # 2. Try iw disconnect via sudo
+    if shutil.which('iw'):
+        try:
+            cmd = ['iw', 'dev', interface, 'disconnect']
+            if shutil.which('sudo') and os.geteuid() != 0:
+                cmd = ['sudo'] + cmd
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode != 0 and res.stderr:
+                errors.append(f"iw: {res.stderr.strip()}")
+        except Exception as e:
+            errors.append(f"iw error: {e}")
+
+    # 3. Try wpa_cli if available as fallback
+    if shutil.which('wpa_cli'):
+        try:
+            cmd = ['wpa_cli', '-i', interface, 'disconnect']
+            if shutil.which('sudo') and os.geteuid() != 0:
+                cmd = ['sudo'] + cmd
+            subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except Exception:
+            pass
+
+    # Clear cached scan state
+    _scan_cache.clear()
+
+    # Verify if interface is still connected
+    conn = get_interface_connection(interface)
+    if not conn.get('connected'):
+        return True, f"Disconnected interface {interface}."
+    else:
+        err_detail = "; ".join(errors) if errors else "Interface remained connected."
+        return False, f"Could not disconnect {interface}: {err_detail}"
 
 def run_live_scan(interface, max_retries=2):
     """Run `sudo iw dev <interface> scan` with retry support for transient timeouts."""
@@ -194,6 +313,40 @@ def api_interfaces():
         'interfaces': get_wireless_interfaces()
     })
 
+@app.route('/api/disconnect', methods=['POST'])
+def api_disconnect():
+    """Disconnect active WiFi connection on the target or any connected wireless interface."""
+    data = request.get_json(silent=True) or {}
+    target_interface = data.get('interface')
+
+    if not target_interface:
+        conn = find_connected_wifi()
+        if conn and conn.get('interface'):
+            target_interface = conn['interface']
+        else:
+            ifaces = get_wireless_interfaces()
+            if ifaces:
+                target_interface = ifaces[0]
+
+    if not target_interface:
+        return jsonify({'success': False, 'error': 'No wireless interface found to disconnect.'}), 200
+
+    ok, msg = disconnect_wifi_interface(target_interface)
+    if not ok:
+        return jsonify({'success': False, 'error': msg}), 200
+
+    # Also check if another interface is still connected
+    other_conn = find_connected_wifi()
+    if other_conn and other_conn.get('connected') and other_conn.get('interface') != target_interface:
+        ok2, msg2 = disconnect_wifi_interface(other_conn['interface'])
+        if not ok2:
+            return jsonify({'success': False, 'error': msg2}), 200
+
+    return jsonify({
+        'success': True,
+        'message': f"Successfully disconnected wireless interface {target_interface}."
+    }), 200
+
 @app.route('/api/scan')
 def api_scan():
     interface = request.args.get('interface', '')
@@ -211,15 +364,36 @@ def api_scan():
             
     raw_output, error = get_scan_result(interface)
     if error:
+        conn = find_connected_wifi(interface)
+        is_conn = bool(conn and conn.get('connected'))
         return jsonify({
             'success': False, 
-            'error': f"Scan failed: {error}"
+            'connected': is_conn,
+            'interface': conn['interface'] if is_conn else interface,
+            'ssid': conn.get('ssid') if is_conn else None,
+            'error': f"Scan failed: {error}" if not error.startswith("Wireless interface") and not error.startswith("Interface") else error
         }), 200
 
     # Empty results are valid (e.g. an RF chamber with no APs in range) -- fall
     # through to a normal success response reporting zero networks rather than
     # surfacing a scary error for what is a legitimately quiet environment.
     records = parse_scan_output(raw_output)
+
+    # Secondary check: if any scanned record was flagged as associated
+    associated_records = [r for r in records if r.get('associated')]
+    if associated_records:
+        assoc = associated_records[0]
+        ssid_label = f" '{assoc['ssid']}'" if assoc.get('ssid') else " (Hidden SSID)"
+        bssid_label = f" [{assoc['bssid']}]" if assoc.get('bssid') else ""
+        return jsonify({
+            'success': False,
+            'connected': True,
+            'error': (
+                f"Wireless interface {interface} is associated to WiFi network{ssid_label}{bssid_label}. "
+                f"The Pi must not be connected to any WiFi network while running WiFi Utilization Monitor. "
+                f"Please disconnect from WiFi before scanning."
+            )
+        }), 200
 
     # Summarize stats for dashboard
     total_aps = len(records)

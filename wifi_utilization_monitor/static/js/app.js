@@ -550,6 +550,7 @@ async function triggerScan() {
         const data = await response.json();
         
         if (data.success) {
+            hideConnectionAlert();
             state.currentScanData = data.records || [];
             state.meta = data.meta || null;
 
@@ -578,12 +579,20 @@ async function triggerScan() {
             // linger as "artifacts" over what should read as an empty/error view
             // (the error status bar already explains what happened).
             clearScanVisualization();
-            state.lastStatusMessage = `Scan Error: ${data.error}`;
-            state.lastStatusClass = 'idle';
+            if (data.connected || (data.error && (data.error.includes('connected') || data.error.includes('associated')))) {
+                showConnectionAlert(data.error, data.interface);
+                state.lastStatusMessage = data.error;
+                state.lastStatusClass = 'error';
+            } else {
+                hideConnectionAlert();
+                state.lastStatusMessage = `Scan Error: ${data.error}`;
+                state.lastStatusClass = 'idle';
+            }
             updateStatusText(state.lastStatusMessage, state.lastStatusClass);
         }
     } catch (e) {
         console.error('Scan request failed', e);
+        hideConnectionAlert();
         clearScanVisualization();
         state.lastStatusMessage = 'Scan request failed. Server offline?';
         state.lastStatusClass = 'idle';
@@ -595,6 +604,69 @@ async function triggerScan() {
         scanBtn.innerHTML = '<i class="fa-solid fa-radar"></i> Scan Now';
     }
 }
+
+function showConnectionAlert(message, iface) {
+    const alertEl = document.getElementById('connectionAlert');
+    const msgEl = document.getElementById('alertMessage');
+    const titleEl = document.getElementById('alertTitle');
+    if (!alertEl) return;
+    
+    if (msgEl && message) {
+        msgEl.textContent = message;
+    }
+    if (titleEl) {
+        titleEl.textContent = iface ? `Active WiFi Connection Detected on ${iface}` : 'Active WiFi Connection Detected';
+    }
+    alertEl.style.display = 'flex';
+}
+
+function hideConnectionAlert() {
+    const alertEl = document.getElementById('connectionAlert');
+    if (alertEl) {
+        alertEl.style.display = 'none';
+    }
+}
+
+async function disconnectWiFi() {
+    const btn = document.getElementById('alertDisconnectBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Disconnecting...';
+    }
+    updateStatusText('Disconnecting WiFi interface...', 'scanning');
+
+    try {
+        const response = await fetch('api/disconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interface: state.selectedInterface })
+        });
+        const data = await response.json();
+        if (data.success) {
+            hideConnectionAlert();
+            updateStatusText(data.message || 'WiFi disconnected. Triggering scan...', 'live');
+            setTimeout(() => {
+                triggerScan();
+            }, 600);
+        } else {
+            alert('Failed to disconnect: ' + (data.error || 'Unknown error'));
+            updateStatusText(`Disconnect failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        console.error('Failed to disconnect WiFi', e);
+        alert('Network error while disconnecting WiFi.');
+        updateStatusText('Disconnect network error', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i> Disconnect WiFi';
+        }
+    }
+}
+
+window.disconnectWiFi = disconnectWiFi;
+window.showConnectionAlert = showConnectionAlert;
+window.hideConnectionAlert = hideConnectionAlert;
 
 // Periodically run scans and countdown ticker
 function startAutoRefresh() {

@@ -22,14 +22,16 @@ class TestRebootManagerRoutes(unittest.TestCase):
         rm_app.config['TESTING'] = True
         self.client = rm_app.test_client()
         # Tests run on macOS/off-Linux, but reset any lingering pending flag anyway.
-        with rm_app_module.reboot_lock:
-            rm_app_module.reboot_state['pending'] = False
-            rm_app_module.reboot_state['requested_at'] = None
+        with rm_app_module.power_lock:
+            rm_app_module.power_state['pending'] = False
+            rm_app_module.power_state['action'] = None
+            rm_app_module.power_state['requested_at'] = None
 
     def test_index_route(self):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'Reboot', response.data)
+        self.assertIn(b'Shutdown', response.data)
 
     def test_index_route_displays_hostname(self):
         response = self.client.get('/')
@@ -90,6 +92,36 @@ class TestCanReboot(unittest.TestCase):
             self.assertIsNone(reason)
 
 
+class TestCanShutdown(unittest.TestCase):
+
+    def test_non_linux_refused(self):
+        with patch('reboot_manager.app.platform.system', return_value='Darwin'):
+            ok, reason = rm_app_module.can_shutdown()
+            self.assertFalse(ok)
+            self.assertIn('Linux', reason)
+
+    def test_linux_without_tools_refused(self):
+        with patch('reboot_manager.app.platform.system', return_value='Linux'), \
+             patch('reboot_manager.app.shutil.which', return_value=None):
+            ok, reason = rm_app_module.can_shutdown()
+            self.assertFalse(ok)
+            self.assertIn('shutdown mechanism', reason)
+
+    def test_linux_with_systemctl_allowed(self):
+        with patch('reboot_manager.app.platform.system', return_value='Linux'), \
+             patch('reboot_manager.app.shutil.which', side_effect=lambda c: '/usr/bin/systemctl' if c == 'systemctl' else None):
+            ok, reason = rm_app_module.can_shutdown()
+            self.assertTrue(ok)
+            self.assertIsNone(reason)
+
+    def test_linux_with_poweroff_allowed(self):
+        with patch('reboot_manager.app.platform.system', return_value='Linux'), \
+             patch('reboot_manager.app.shutil.which', side_effect=lambda c: '/usr/sbin/poweroff' if c == 'poweroff' else None):
+            ok, reason = rm_app_module.can_shutdown()
+            self.assertTrue(ok)
+            self.assertIsNone(reason)
+
+
 class TestApiStatus(unittest.TestCase):
 
     def setUp(self):
@@ -101,6 +133,7 @@ class TestApiStatus(unittest.TestCase):
             response = self.client.get('/api/status')
             data = response.get_json()
             self.assertFalse(data['can_reboot'])
+            self.assertFalse(data['can_shutdown'])
             self.assertIn('reason', data)
             self.assertIn('hostname', data)
             self.assertIn('uptime_text', data)
@@ -111,9 +144,10 @@ class TestApiReboot(unittest.TestCase):
     def setUp(self):
         rm_app.config['TESTING'] = True
         self.client = rm_app.test_client()
-        with rm_app_module.reboot_lock:
-            rm_app_module.reboot_state['pending'] = False
-            rm_app_module.reboot_state['requested_at'] = None
+        with rm_app_module.power_lock:
+            rm_app_module.power_state['pending'] = False
+            rm_app_module.power_state['action'] = None
+            rm_app_module.power_state['requested_at'] = None
 
     def test_reboot_refused_off_linux(self):
         with patch('reboot_manager.app.platform.system', return_value='Darwin'):
@@ -169,6 +203,80 @@ class TestApiReboot(unittest.TestCase):
              patch('reboot_manager.app.shutil.which', return_value='/usr/bin/systemctl'), \
              patch('reboot_manager.app.subprocess.run', side_effect=OSError('boom')):
             rm_app_module._do_reboot()  # must not raise
+
+
+class TestApiShutdown(unittest.TestCase):
+
+    def setUp(self):
+        rm_app.config['TESTING'] = True
+        self.client = rm_app.test_client()
+        with rm_app_module.power_lock:
+            rm_app_module.power_state['pending'] = False
+            rm_app_module.power_state['action'] = None
+            rm_app_module.power_state['requested_at'] = None
+
+    def test_shutdown_refused_off_linux(self):
+        with patch('reboot_manager.app.platform.system', return_value='Darwin'):
+            response = self.client.post('/api/shutdown', json={'confirm': 'SHUTDOWN'})
+            self.assertEqual(response.status_code, 501)
+            self.assertIn('error', response.get_json())
+
+    def test_shutdown_refused_without_confirmation(self):
+        with patch('reboot_manager.app.can_shutdown', return_value=(True, None)):
+            response = self.client.post('/api/shutdown', json={})
+            self.assertEqual(response.status_code, 400)
+
+    def test_shutdown_refused_with_wrong_confirmation(self):
+        with patch('reboot_manager.app.can_shutdown', return_value=(True, None)):
+            response = self.client.post('/api/shutdown', json={'confirm': 'SHUT DOWN'})
+            self.assertEqual(response.status_code, 400)
+
+    def test_shutdown_triggers_background_thread(self):
+        with patch('reboot_manager.app.can_shutdown', return_value=(True, None)), \
+             patch('reboot_manager.app.threading.Thread') as mock_thread:
+            response = self.client.post('/api/shutdown', json={'confirm': 'SHUTDOWN'})
+            self.assertEqual(response.status_code, 202)
+            mock_thread.assert_called_once()
+            mock_thread.return_value.start.assert_called_once()
+
+    def test_shutdown_rejects_concurrent_trigger(self):
+        with patch('reboot_manager.app.can_shutdown', return_value=(True, None)), \
+             patch('reboot_manager.app.threading.Thread'):
+            first = self.client.post('/api/shutdown', json={'confirm': 'SHUTDOWN'})
+            self.assertEqual(first.status_code, 202)
+            second = self.client.post('/api/shutdown', json={'confirm': 'SHUTDOWN'})
+            self.assertEqual(second.status_code, 409)
+
+    def test_do_shutdown_runs_expected_command(self):
+        with patch('reboot_manager.app.time.sleep'), \
+             patch('reboot_manager.app.shutil.which', return_value='/usr/bin/systemctl'), \
+             patch('reboot_manager.app.subprocess.run') as mock_run:
+            rm_app_module._do_shutdown()
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd, ['sudo', 'systemctl', 'poweroff'])
+
+    def test_do_shutdown_falls_back_without_systemctl(self):
+        with patch('reboot_manager.app.time.sleep'), \
+             patch('reboot_manager.app.shutil.which', side_effect=lambda c: '/usr/sbin/poweroff' if c == 'poweroff' else None), \
+             patch('reboot_manager.app.subprocess.run') as mock_run:
+            rm_app_module._do_shutdown()
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd, ['sudo', 'poweroff'])
+
+    def test_do_shutdown_falls_back_to_shutdown_cmd(self):
+        with patch('reboot_manager.app.time.sleep'), \
+             patch('reboot_manager.app.shutil.which', return_value=None), \
+             patch('reboot_manager.app.subprocess.run') as mock_run:
+            rm_app_module._do_shutdown()
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd, ['sudo', 'shutdown', '-h', 'now'])
+
+    def test_do_shutdown_swallows_errors(self):
+        with patch('reboot_manager.app.time.sleep'), \
+             patch('reboot_manager.app.shutil.which', return_value='/usr/bin/systemctl'), \
+             patch('reboot_manager.app.subprocess.run', side_effect=OSError('boom')):
+            rm_app_module._do_shutdown()  # must not raise
 
 
 if __name__ == '__main__':

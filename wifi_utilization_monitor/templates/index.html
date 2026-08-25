@@ -229,6 +229,12 @@ body {
     animation: pulse 2s infinite ease-in-out;
 }
 
+.pulse-dot.error, .pulse-dot.connected {
+    background-color: var(--color-pink);
+    box-shadow: 0 0 10px var(--color-pink);
+    animation: pulse 1.2s infinite ease-in-out;
+}
+
 @keyframes pulse {
     0% { transform: scale(0.95); opacity: 0.5; }
     50% { transform: scale(1.15); opacity: 1; }
@@ -366,6 +372,74 @@ body {
     background: rgba(255, 59, 116, 0.15);
     border-color: var(--color-pink);
     color: var(--color-pink);
+}
+
+.btn-red {
+    background: linear-gradient(135deg, var(--color-pink) 0%, #e0004d 100%);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(255, 59, 116, 0.25);
+}
+
+.btn-red:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(255, 59, 116, 0.4);
+}
+
+.btn-red:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.btn-red:disabled {
+    background: var(--text-muted);
+    opacity: 0.6;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.connection-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 1rem 1.5rem;
+    background: rgba(255, 59, 116, 0.12);
+    border: 1px solid rgba(255, 59, 116, 0.4);
+    border-radius: 16px;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.alert-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+    min-width: 250px;
+}
+
+.alert-icon {
+    font-size: 1.8rem;
+    color: var(--color-pink);
+    flex-shrink: 0;
+}
+
+.alert-text h4 {
+    margin: 0 0 0.25rem 0;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.alert-text p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.alert-actions {
+    flex-shrink: 0;
 }
 
 /* Dashboard Grid Layout */
@@ -1050,7 +1124,7 @@ body {
             <div class="logo">
                 <i class="fa-solid fa-wifi fa-bounce logo-icon"></i>
                 <div class="logo-text">
-                    <h1>WIFI<span>MON</span><span class="version-tag" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-43-g856732f<!--/VERSION--></span></h1>
+                    <h1>WIFI<span>MON</span><span class="version-tag" title="WiFiPi version (git-stamped at commit time)"><!--VERSION-->v0.2-44-g5755574<!--/VERSION--></span></h1>
                     <span class="subtitle">Live Spectrum & Channel Monitor</span>
                 </div>
                 <span class="host-badge" title="Hostname of the machine serving this page">
@@ -1095,7 +1169,10 @@ body {
                         <i class="fa-solid fa-house"></i>
                     </a>
                     <a href="../reboot/" class="btn btn-secondary" title="Reboot Host" style="text-decoration: none;">
-                        <i class="fa-solid fa-power-off"></i> Reboot
+                        <i class="fa-solid fa-rotate"></i> Reboot
+                    </a>
+                    <a href="../reboot/" class="btn btn-secondary" title="Shutdown Host" style="text-decoration: none;">
+                        <i class="fa-solid fa-power-off"></i> Shutdown
                     </a>
                 </div>
             </div>
@@ -1103,6 +1180,22 @@ body {
 
         <!-- Main Dashboard Layout -->
         <main class="dashboard-grid">
+
+            <!-- Active Connection Alert Banner -->
+            <div id="connectionAlert" class="glass-card connection-alert" style="display: none;">
+                <div class="alert-content">
+                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
+                    <div class="alert-text">
+                        <h4 id="alertTitle">Active WiFi Connection Detected</h4>
+                        <p id="alertMessage">Wireless interface is currently connected to WiFi. The Pi must not be connected to any WiFi network while running WiFi Utilization Monitor.</p>
+                    </div>
+                </div>
+                <div class="alert-actions">
+                    <button id="alertDisconnectBtn" class="btn btn-red" onclick="disconnectWiFi()">
+                        <i class="fa-solid fa-plug-circle-xmark"></i> Disconnect WiFi
+                    </button>
+                </div>
+            </div>
 
             <div class="main-split">
             <div class="main-col">
