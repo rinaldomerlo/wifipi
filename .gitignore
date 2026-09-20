@@ -221,10 +221,5 @@ __marimo__/
 # Web Browsing Simulator's generated synthetic content corpus (regenerated on every app start)
 web_browsing_simulator/content/
 
-# ttyd static binary — installed to /usr/local/bin, but ignore it in case it's
-# downloaded into the repo (README points downloads at $HOME/Downloads instead)
-ttyd.aarch64
-ttyd.*
-
 # Video Stream Simulator's generated HLS ladder (~62 MB, generated on first app start)
 video_stream_simulator/content/

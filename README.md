@@ -22,13 +22,11 @@ Wireless Testing Environment tools to run on a Raspberry Pi.
    A browser-based tool that inventories every device currently reachable on the LAN behind a chosen Bind Interface — IP address, MAC address, vendor, and hostname — via a privileged ARP-based `nmap -sn` sweep, so it finds devices even when every port they expose is closed or firewalled.
 8. **WiFi Roaming Monitor (`roaming_monitor`)**  
    A browser-based live timeline of association events (`iw event`) for a chosen wireless interface: authentication, association, connection, deauthentication and disconnection, each timestamped from the kernel and streamed to the browser. Measures how long a roam between two BSSIDs actually took — including 802.11r fast transitions that skip the disconnect entirely — and decodes 802.11 reason codes so a drop reports "4-Way Handshake timeout" rather than "reason 15". Intended for chamber testing where a variable attenuator is used to force transitions between APs.
-9. **Web Terminal (`web_terminal`)**  
-   A browser-based interactive shell on the Pi, for the commands the other apps don't cover. The terminal itself is [ttyd](https://github.com/tsl0922/ttyd) — a mature daemon embedding xterm.js that handles the PTY, VT/ANSI emulation, resize and reconnect — bound to loopback and framed by a thin Flask wrapper that supplies the shared WiFiPi header and hostname badge. Unlike every other app here it runs as a non-root user. Requires a one-off manual install of `ttyd` (see below).
-10. **WiFi Porcupine (`wifi_porcupine`)**  
+9. **WiFi Porcupine (`wifi_porcupine`)**  
    A browser-based tool that stresses an access point by rapidly and randomly associating and disassociating several physical WiFi interfaces (the Pi's built-in radio plus USB adapters) against one target SSID, optionally randomizing each interface's MAC on every reconnect (via NetworkManager's `cloned-mac-address`, a per-run toggle) so the hub sees a constant stream of brand-new stations — bloating its association, DHCP-lease and ARP tables. Three sliders shape the churn: **Presence** (what fraction of the time each interface stays connected — its duty cycle), **Churn rate** (reconnects per minute), and **Variability** (how bursty vs. metronomic the timing is). A low Presence + slow rate models a quiet household device that is disconnected most of the time; a high rate is a full association storm. Concurrency is simply however many interfaces you tick, all churning at once and independently randomized so they never move in lockstep. A built-in scan lets you pick the target SSID from nearby networks instead of typing it, auto-filling the password too if this Pi already has that network saved elsewhere. Refuses gracefully off-Linux or without NetworkManager (e.g. macOS development).
-11. **Video Stream Simulator (`video_stream_simulator`)**  
+10. **Video Stream Simulator (`video_stream_simulator`)**  
    A browser-based tool that simulates adaptive-bitrate video streaming against another Pi, complementing the Web Browsing Simulator's bursty page loads. Every instance generates and serves a real HLS ABR ladder (240p/400 kbps up to 1080p/5 Mbps, ~62 MB) whose segments are synthetic bytes sized exactly as a real encode at that bitrate would be — so the link, not a video decoder, is what gets exercised. Each simulated viewer keeps a playback buffer, fetches segments only while that buffer is below target and then idles, producing the on/off sawtooth a real player generates rather than a flat-out download; it also runs its own ABR logic, estimating throughput from recent segments and switching rendition to match. The result is reported as the metrics video actually cares about — startup delay, rebuffer count and stall time, rendition switches, and the bitrate the link could sustain — rather than raw Mbps. ABR can be turned off to pin every viewer to one rung, which is how you ask "can this link really carry N streams at 1080p?"
-12. **Reboot Manager (`reboot_manager`)**  
+11. **Reboot Manager (`reboot_manager`)**  
    A browser-based tool that shows this Pi's uptime and reboots it (`systemctl reboot`) or shuts it down (`systemctl poweroff`) behind a cancellable countdown, with the API itself requiring an explicit confirmation token as a second safeguard against an accidental trigger. Runs as root by default, like Client Simulator and WiFi Porcupine, so it needs no sudoers entry. Refuses gracefully off-Linux or without a reboot/shutdown mechanism on PATH (e.g. macOS development).
 12. **Default Landing Webpage (`www`)**  
    A static landing page (`www/index.html`) served at root (`/`) providing direct access cards/links to all tools in the platform.
@@ -58,12 +56,12 @@ Clone or place the `wifipi` repository in `/opt/wifipi`:
 sudo mkdir -p /opt/wifipi
 sudo chown -R $USER:$USER /opt/wifipi
 git clone https://github.com/rinaldomerlo/wifipi.git /opt/wifipi
-cd /opt/wifipi
 ```
 
 Create a shared Python virtual environment and install dependencies (including Gunicorn):
 
 ```bash
+cd /opt/wifipi
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -101,29 +99,11 @@ To allow the app user to execute these commands without a password prompt:
 
 Systemd service files are provided in the `deploy/` directory. Copy them to `/etc/systemd/system/`:
 
-#### Prerequisite for the Web Terminal: install `ttyd`
-
-The Web Terminal is the only app with a dependency outside the Python virtualenv. **`ttyd` is not packaged in Debian Bookworm or Trixie** (only in `sid`), so `apt install ttyd` will fail on Raspberry Pi OS. Install upstream's static release binary instead:
-
-```bash
-wget -O $HOME/Downloads/ttyd.aarch64 https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.aarch64
-sudo install -m 755 $HOME/Downloads/ttyd.aarch64 /usr/local/bin/ttyd
-ttyd --version
-```
-
-The binary only needs to reach `/usr/local/bin` — download it outside the repo (`$HOME/Downloads`, which
-Raspberry Pi OS always has) rather than into `/opt/wifipi`, so it doesn't linger as an untracked file in
-the working tree.
-
-Check the [releases page](https://github.com/tsl0922/ttyd/releases) for the current version and to verify the checksum.
-
-The Web Terminal has no authentication, so anyone who can reach the Pi gets a shell. If you want a password on it, add `--credential user:password` to the `ExecStart` line in `deploy/ttyd.service`.
-
 #### Install only the apps this Pi should run
 
 The suite is modular: each Pi runs only the subset of tools you want it to (a monitor Pi, a
-traffic-generator Pi, a porcupine Pi, and so on). Every app is one self-contained systemd unit — the Web
-Terminal is two — so you install just the units you want and pair each with its nginx snippet in Step 5.
+traffic-generator Pi, a porcupine Pi, and so on). Every app is one self-contained systemd unit —
+so you install just the units you want and pair each with its nginx snippet in Step 5.
 **You never edit the landing page per Pi**: it auto-detects which apps are actually running and shows only
 those cards.
 
@@ -138,7 +118,6 @@ those cards.
 | Client Simulator | `client-simulator` | `clientsim.conf` |
 | Network Device Scanner | `network-device-scanner` | `devices.conf` |
 | WiFi Roaming Monitor | `roaming-monitor` | `roaming.conf` |
-| Web Terminal | `web-terminal` + `ttyd` | `terminal.conf` (+ WebSocket map) |
 | WiFi Porcupine | `wifi-porcupine` | `porcupine.conf` |
 | Reboot Manager | `reboot-manager` | `reboot.conf` |
 
@@ -162,25 +141,9 @@ sudo cp deploy/wifi-porcupine.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-To run the whole suite on one box, copy them all (remember the Web Terminal is `web-terminal` **and**
-`ttyd`, and needs the `ttyd` binary installed above).
+To run the whole suite on one box, copy them all.
 
 *Note on Service Users*: The unit files in `deploy/` run as `root` by default so they work across any Linux distribution/user setup without missing-user errors. If you prefer to run services under a non-root account (e.g. `User=jenkins` or `User=pi`), edit the service files in `/etc/systemd/system/` to uncomment and update the `User=` and `Group=` parameters. (Setting `User=` to a non-existent user will cause systemd to fail with `status=217/USER`).
-
-#### Set the Web Terminal's user account
-
-`ttyd.service` and `web-terminal.service` both default to `User=pi`, but Raspberry Pi OS Bookworm and later no longer create a `pi` user — so unless you deliberately named your account `pi`, change it in **both** files. Each has a clearly marked block at the top of its `[Service]` section; edit those, or set both at once:
-
-```bash
-TERM_USER=<your-username>
-sudo sed -i "s/^User=pi$/User=$TERM_USER/" \
-    /etc/systemd/system/ttyd.service /etc/systemd/system/web-terminal.service
-sudo systemctl daemon-reload
-```
-
-This is an in-place edit rather than a config setting because systemd does not expand environment variables in `User=`. Pointing it at a non-existent account fails with `status=217/USER`.
-
-Note that neither unit sets `Group=`, so systemd uses the account's primary group from `/etc/passwd`. Don't add one: on images where the primary group isn't named after the user, a hardcoded `Group=` fails with `status=216/GROUP`. Check yours with `id <your-username>` if you're curious. If a unit has already failed repeatedly, systemd latches its rate limiter and you need `sudo systemctl reset-failed ttyd web-terminal` before it will start again.
 
 Enable and start only the units you copied in, e.g. for the **monitor Pi** from above:
 
@@ -254,22 +217,13 @@ content to author or copy over by hand.
    sudo cp deploy/nginx.d/wificonnect.conf /etc/nginx/wifipi.d/
    ```
 
-3. Install the WebSocket upgrade map — but only if you installed the Web Terminal. This has to be a
-   separate file: nginx's `map` directive is only valid in `http { }` context, and Debian's nginx includes
-   `/etc/nginx/conf.d/*.conf` at that level:
-   ```bash
-   sudo cp deploy/nginx-websocket-map.conf.example /etc/nginx/conf.d/websocket-upgrade.conf
-   ```
-   Skip this if you are also skipping the Web Terminal — but if `terminal.conf` is present in
-   `/etc/nginx/wifipi.d/` without this map, `nginx -t` fails with `unknown "connection_upgrade" variable`.
-
-4. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
+3. Enable the site configuration by creating a symbolic link in `sites-enabled` and removing the default Nginx site:
    ```bash
    sudo ln -s /etc/nginx/sites-available/wifipi /etc/nginx/sites-enabled/
    sudo rm -f /etc/nginx/sites-enabled/default
    ```
 
-5. Test the Nginx configuration, then enable and (re)start Nginx:
+4. Test the Nginx configuration, then enable and (re)start Nginx:
    ```bash
    sudo nginx -t
    sudo systemctl enable --now nginx
@@ -301,7 +255,6 @@ All applications are served over standard HTTP (Port 80) via path routing:
 - **Client Simulator**: Open `http://<pi-ip>/clientsim/` (Subpath `/clientsim/` reverse-proxied to Gunicorn on port 5005)
 - **Network Device Scanner**: Open `http://<pi-ip>/devices/` (Subpath `/devices/` reverse-proxied to Gunicorn on port 5006)
 - **WiFi Roaming Monitor**: Open `http://<pi-ip>/roaming/` (Subpath `/roaming/` reverse-proxied to Gunicorn on port 5007)
-- **Web Terminal**: Open `http://<pi-ip>/terminal/` (Subpath `/terminal/` reverse-proxied to Gunicorn on port 5008, with `/terminal/tty/` reverse-proxied to the loopback-bound `ttyd` on port 5009)
 - **WiFi Porcupine**: Open `http://<pi-ip>/porcupine/` (Subpath `/porcupine/` reverse-proxied to Gunicorn on port 5010)
 - **Video Stream Simulator**: Open `http://<pi-ip>/videostream/` (Subpath `/videostream/` reverse-proxied to Gunicorn on port 5012, with `/videostream/content/` served directly by Nginx)
 - **Reboot Manager**: Open `http://<pi-ip>/reboot/` (Subpath `/reboot/` reverse-proxied to Gunicorn on port 5011)
