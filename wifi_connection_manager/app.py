@@ -93,6 +93,213 @@ def classify_band(freq_mhz):
     return "6GHz"
 
 
+def classify_wifi_generation(
+    freq_mhz=None,
+    bitrate_str=None,
+    raw_ies=None,
+    band=None,
+) -> tuple:
+    """Classify WiFi generation (e.g. 'Wi-Fi 6') and standard (e.g. '802.11ax').
+
+    Returns (wifi_generation, protocol) or (None, None).
+    Supports Wi-Fi 1 through Wi-Fi 7:
+    - Wi-Fi 7: 802.11be (EHT)
+    - Wi-Fi 6E: 802.11ax (HE on 6GHz)
+    - Wi-Fi 6: 802.11ax (HE on 2.4/5GHz)
+    - Wi-Fi 5: 802.11ac (VHT on 5GHz)
+    - Wi-Fi 4: 802.11n (HT on 2.4/5GHz)
+    - Wi-Fi 3: 802.11g (OFDM on 2.4GHz)
+    - Wi-Fi 2: 802.11a (OFDM on 5GHz)
+    - Wi-Fi 1: 802.11b (DSSS/CCK on 2.4GHz)
+    """
+    effective_band = band or (classify_band(freq_mhz) if freq_mhz is not None else None)
+
+    # 1. Check raw_ies / BSS block capabilities if provided
+    if raw_ies:
+        if isinstance(raw_ies, dict):
+            ie_text = " ".join(str(v) for v in raw_ies.values()) + " " + " ".join(raw_ies.keys())
+        else:
+            ie_text = str(raw_ies)
+
+        if re.search(r'\bEHT capabilities\b|\bEHT operation\b|\bEHT\b', ie_text, re.I):
+            return "Wi-Fi 7", "802.11be"
+        if re.search(r'\bHE capabilities\b|\bHE operation\b|\bHE\b', ie_text, re.I):
+            if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+                return "Wi-Fi 6E", "802.11ax"
+            return "Wi-Fi 6", "802.11ax"
+        if re.search(r'\bVHT capabilities\b|\bVHT operation\b|\bVHT\b', ie_text, re.I):
+            return "Wi-Fi 5", "802.11ac"
+        if re.search(r'\bHT capabilities\b|\bHT operation\b|\bHT\b', ie_text, re.I):
+            return "Wi-Fi 4", "802.11n"
+
+    # 2. Check bitrate string (MCS, protocol indicators, numerical throughput)
+    if bitrate_str:
+        bs = str(bitrate_str)
+        if re.search(r'\bEHT\b|EHT-MCS|802\.11be', bs, re.I):
+            return "Wi-Fi 7", "802.11be"
+        if re.search(r'\bHE\b|HE-MCS|802\.11ax', bs, re.I):
+            if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+                return "Wi-Fi 6E", "802.11ax"
+            return "Wi-Fi 6", "802.11ax"
+        if re.search(r'\bVHT\b|VHT-MCS|802\.11ac', bs, re.I):
+            return "Wi-Fi 5", "802.11ac"
+        if re.search(r'\bHT\b|HT-MCS|\bMCS\b|802\.11n', bs, re.I):
+            return "Wi-Fi 4", "802.11n"
+
+        m = re.search(r'([\d.]+)\s*M[Bb]it/s', bs)
+        if m:
+            try:
+                rate = float(m.group(1))
+                if rate > 2400:
+                    if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+                        return "Wi-Fi 6E", "802.11ax"
+                    return "Wi-Fi 6", "802.11ax"
+                elif rate > 600:
+                    if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+                        return "Wi-Fi 6E", "802.11ax"
+                    elif (freq_mhz and freq_mhz < 2500) or effective_band == "2.4GHz":
+                        return "Wi-Fi 6", "802.11ax"
+                    else:
+                        return "Wi-Fi 5", "802.11ac"
+                elif rate > 54:
+                    if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+                        return "Wi-Fi 6E", "802.11ax"
+                    elif (freq_mhz and freq_mhz < 2500) or effective_band == "2.4GHz":
+                        return "Wi-Fi 4", "802.11n"
+                    else:
+                        if abs(rate - 433.3) < 1.0 or abs(rate - 866.7) < 1.0:
+                            return "Wi-Fi 5", "802.11ac"
+                        return "Wi-Fi 4", "802.11n"
+                elif rate <= 54:
+                    if (freq_mhz and freq_mhz >= 4900) or effective_band == "5GHz":
+                        return "Wi-Fi 2", "802.11a"
+                    elif (freq_mhz and freq_mhz < 2500) or effective_band == "2.4GHz":
+                        if rate <= 11.0:
+                            return "Wi-Fi 1", "802.11b"
+                        else:
+                            return "Wi-Fi 3", "802.11g"
+            except ValueError:
+                pass
+
+    # 3. Fallback based on band and frequency
+    if (freq_mhz and freq_mhz >= 5925) or effective_band == "6GHz":
+        return "Wi-Fi 6E", "802.11ax"
+    if (freq_mhz and freq_mhz >= 4900) or effective_band == "5GHz":
+        return "Wi-Fi 5", "802.11ac"
+    if (freq_mhz and freq_mhz < 2500) or effective_band == "2.4GHz":
+        return "Wi-Fi 4", "802.11n"
+
+    return None, None
+
+
+def _run_cmd(cmd, timeout=5):
+    """Run command and return stdout string, or None on error."""
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if res.returncode == 0 and res.stdout:
+            return res.stdout
+    except Exception:
+        pass
+    return None
+
+
+def get_link_bitrate_and_freq(iface: str):
+    """Read bitrate string, frequency and BSSID from `iw dev <iface> link` or station dump."""
+    if not shutil.which("iw"):
+        return None, None, None
+
+    out = _run_cmd(["iw", "dev", iface, "link"])
+    if not out:
+        out = _run_cmd(["sudo", "-n", "iw", "dev", iface, "link"])
+
+    freq_mhz = None
+    tx_bitrate = None
+    rx_bitrate = None
+    bssid = None
+
+    if out:
+        conn_m = re.search(r"Connected to ([0-9a-fA-F:]{17})", out, re.I)
+        if conn_m:
+            bssid = conn_m.group(1).lower()
+        freq_m = re.search(r"^\s*freq:\s*([\d.]+)", out, re.M)
+        if freq_m:
+            try:
+                freq_mhz = int(float(freq_m.group(1)))
+            except ValueError:
+                pass
+        tx_m = re.search(r"^\s*tx bitrate:\s*(.+)$", out, re.M)
+        if tx_m:
+            tx_bitrate = tx_m.group(1).strip()
+        rx_m = re.search(r"^\s*rx bitrate:\s*(.+)$", out, re.M)
+        if rx_m:
+            rx_bitrate = rx_m.group(1).strip()
+
+    if not tx_bitrate and not rx_bitrate:
+        sd_out = _run_cmd(["iw", "dev", iface, "station", "dump"])
+        if not sd_out:
+            sd_out = _run_cmd(["sudo", "-n", "iw", "dev", iface, "station", "dump"])
+        if sd_out:
+            if not bssid:
+                b_m = re.search(r"Station\s+([0-9a-fA-F:]{17})", sd_out, re.I)
+                if b_m:
+                    bssid = b_m.group(1).lower()
+            tx_m = re.search(r"^\s*tx bitrate:\s*(.+)$", sd_out, re.M)
+            if tx_m:
+                tx_bitrate = tx_m.group(1).strip()
+            rx_m = re.search(r"^\s*rx bitrate:\s*(.+)$", sd_out, re.M)
+            if rx_m:
+                rx_bitrate = rx_m.group(1).strip()
+
+    bitrate_str = tx_bitrate or rx_bitrate
+    return bitrate_str, freq_mhz, bssid
+
+
+def get_scan_dump_bssid_map(iface: str) -> dict:
+    """Return map of BSSID -> bss block text from `iw dev <iface> scan dump`."""
+    if not shutil.which("iw"):
+        return {}
+    out = _run_cmd(["iw", "dev", iface, "scan", "dump"])
+    if not out:
+        out = _run_cmd(["sudo", "-n", "iw", "dev", iface, "scan", "dump"])
+    if not out:
+        return {}
+    bssid_map = {}
+    for block in re.split(r"(?=BSS\s+[0-9a-fA-F:]{17})", out):
+        m = re.match(r"BSS\s+([0-9a-fA-F:]{17})", block, re.I)
+        if m:
+            bssid_map[m.group(1).lower()] = block
+    return bssid_map
+
+
+def _get_active_wifi_generation(iface: str, freq_mhz=None, band=None) -> tuple:
+    bitrate_str, link_freq, bssid = get_link_bitrate_and_freq(iface)
+    effective_freq = link_freq or freq_mhz
+    effective_band = band or (classify_band(effective_freq) if effective_freq is not None else None)
+
+    if bitrate_str:
+        gen, proto = classify_wifi_generation(
+            freq_mhz=effective_freq,
+            bitrate_str=bitrate_str,
+            band=effective_band,
+        )
+        if gen:
+            return gen, proto
+
+    if bssid:
+        bss_map = get_scan_dump_bssid_map(iface)
+        bss_block = bss_map.get(bssid.lower())
+        if bss_block:
+            gen, proto = classify_wifi_generation(
+                freq_mhz=effective_freq,
+                raw_ies=bss_block,
+                band=effective_band,
+            )
+            if gen:
+                return gen, proto
+
+    return classify_wifi_generation(freq_mhz=effective_freq, band=effective_band)
+
+
 MISSING_SECRETS_PATTERN = r"Secrets were required|802-11-wireless-security\.psk|key-mgmt"
 
 CONNECT_ERROR_PATTERNS = [
@@ -236,6 +443,10 @@ def interface_status(iface: str) -> dict:
         if len(conn_field) >= 2:
             connection_name = conn_field[1]
 
+    wifi_gen, proto = _get_active_wifi_generation(
+        iface, freq_mhz=connected.get("freq_mhz"), band=connected.get("band")
+    )
+
     return {
         "interface": iface,
         "connected": True,
@@ -246,6 +457,8 @@ def interface_status(iface: str) -> dict:
         "security": connected["security"],
         "channel": connected["channel"],
         "band": connected["band"],
+        "wifi_generation": wifi_gen,
+        "protocol": proto,
     }
 
 
@@ -279,15 +492,20 @@ def api_scan():
     if err:
         return jsonify({"success": False, "error": f"Scan failed: {err}"}), 200
 
+    bss_map = get_scan_dump_bssid_map(iface)
     networks = []
     for line in (out or "").strip().splitlines():
         parts = _split_terse(line)
         if len(parts) < 7:
             continue
-        in_use, ssid, signal, security, chan, freq, bssid = parts[:7]
+        in_use, ssid, signal, security, chan, freq = parts[:6]
+        bssid = ":".join(parts[6:])
         if not ssid:
             continue
         freq_mhz = int(freq.split()[0]) if freq.split() and freq.split()[0].isdigit() else None
+        band = classify_band(freq_mhz)
+        raw_ies = bss_map.get(bssid.lower()) if bssid else None
+        wifi_gen, proto = classify_wifi_generation(freq_mhz=freq_mhz, raw_ies=raw_ies, band=band)
         networks.append({
             "ssid": ssid,
             "bssid": bssid,
@@ -295,7 +513,9 @@ def api_scan():
             "signal": int(signal) if signal.isdigit() else 0,
             "security": classify_security(security),
             "channel": int(chan) if chan.isdigit() else None,
-            "band": classify_band(freq_mhz),
+            "band": band,
+            "wifi_generation": wifi_gen,
+            "protocol": proto,
         })
 
     # De-duplicate SSIDs seen on multiple BSSIDs (e.g. mesh/repeater setups).

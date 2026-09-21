@@ -8,8 +8,8 @@ A Flask-based web application to scan for nearby WiFi networks, connect or disco
 
 | Feature | Description |
 |---|---|
-| **Connection Status** | Live view of the current connection: SSID, IP address, signal strength, security, band, and channel. |
-| **Network Scanning** | Scans for nearby WiFi networks via `nmcli device wifi list`, de-duplicated by SSID and sorted by signal strength. |
+| **Connection Status** | Live view of the current connection: SSID, IP address, signal strength, security, band, channel, and WiFi generation (Wi-Fi 1 through 7). |
+| **Network Scanning** | Scans for nearby WiFi networks via `nmcli device wifi list`, identifying WiFi generation standards, de-duplicated by SSID and sorted by signal strength. |
 | **Connect / Disconnect** | Connect to open networks immediately, or secured networks via a password prompt. Disconnect the active connection with one click. |
 | **Saved Networks** | Lists NetworkManager connection profiles, with the ability to reconnect or forget (delete) them. |
 | **Auto-Connect Control** | Per-network toggle to enable/disable NetworkManager's auto-connect, useful in test-lab environments where automatic roaming/reconnection is unwanted. |

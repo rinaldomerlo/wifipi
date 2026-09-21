@@ -162,6 +162,14 @@
         .badge-sec.open { background: rgba(255, 59, 116, 0.15); color: var(--color-pink); border: 1px solid rgba(255, 59, 116, 0.2); }
         .badge-connected { background: rgba(0, 230, 118, 0.15); color: var(--color-green); border: 1px solid rgba(0, 230, 118, 0.3); text-transform: uppercase; letter-spacing: 0.5px; }
 
+        .badge-gen { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.3rem; font-family: var(--font-heading); letter-spacing: 0.5px; white-space: nowrap; }
+        .badge-gen.wifi-7 { background: rgba(171, 71, 188, 0.2); color: #d05ce3; border: 1px solid rgba(171, 71, 188, 0.4); }
+        .badge-gen.wifi-6e { background: rgba(0, 210, 255, 0.18); color: #26e0ff; border: 1px solid rgba(0, 210, 255, 0.4); }
+        .badge-gen.wifi-6 { background: rgba(0, 210, 255, 0.12); color: var(--color-blue); border: 1px solid rgba(0, 210, 255, 0.3); }
+        .badge-gen.wifi-5 { background: rgba(0, 230, 118, 0.12); color: var(--color-green); border: 1px solid rgba(0, 230, 118, 0.3); }
+        .badge-gen.wifi-4 { background: rgba(255, 145, 0, 0.12); color: var(--color-orange); border: 1px solid rgba(255, 145, 0, 0.3); }
+        .badge-gen.wifi-legacy { background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); border: 1px solid var(--glass-border); }
+
         .signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
         .signal-bars i { width: 3px; border-radius: 1px; background: var(--text-muted); display: block; }
         .signal-bars i:nth-child(1) { height: 30%; } .signal-bars i:nth-child(2) { height: 55%; }
@@ -271,10 +279,10 @@
             <div class="table-responsive">
                 <table>
                     <thead>
-                        <tr><th>Interface</th><th>Status</th><th>IP</th><th>Signal</th><th>Band &middot; Channel</th><th style="text-align:right;">Action</th></tr>
+                        <tr><th>Interface</th><th>Status</th><th>Generation</th><th>IP</th><th>Signal</th><th>Band &middot; Channel</th><th style="text-align:right;">Action</th></tr>
                     </thead>
                     <tbody id="interfacesBody">
-                        <tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr>
+                        <tr class="empty-row"><td colspan="7">Loading&hellip;</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -304,10 +312,10 @@
             <div class="table-responsive">
                 <table>
                     <thead>
-                        <tr><th>Network</th><th>Signal</th><th>Security</th><th>Band</th><th>Channel</th><th style="text-align:right;">Action</th></tr>
+                        <tr><th>Network</th><th>Signal</th><th>Security</th><th>Generation</th><th>Band</th><th>Channel</th><th style="text-align:right;">Action</th></tr>
                     </thead>
                     <tbody id="networksBody">
-                        <tr class="empty-row"><td colspan="6">Scanning&hellip;</td></tr>
+                        <tr class="empty-row"><td colspan="7">Scanning&hellip;</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -440,6 +448,24 @@
         return `<span class="badge badge-sec ${isOpen ? 'open' : ''}">${security}</span>`;
     }
 
+    function wifiGenBadgeClass(gen) {
+        if (!gen) return 'wifi-legacy';
+        const g = String(gen).toUpperCase();
+        if (g.includes('7')) return 'wifi-7';
+        if (g.includes('6E')) return 'wifi-6e';
+        if (g.includes('6')) return 'wifi-6';
+        if (g.includes('5')) return 'wifi-5';
+        if (g.includes('4')) return 'wifi-4';
+        return 'wifi-legacy';
+    }
+
+    function wifiGenBadge(gen, proto) {
+        if (!gen) return '<span class="cell-muted">&mdash;</span>';
+        const cls = wifiGenBadgeClass(gen);
+        const title = proto ? `${gen} (${proto})` : gen;
+        return `<span class="badge badge-gen ${cls}" title="${escapeHtml(title)}">${escapeHtml(gen)}</span>`;
+    }
+
     function escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str;
@@ -451,7 +477,7 @@
         ifaceSsidMap = {};
 
         if (!data.success) {
-            interfacesBody.innerHTML = `<tr class="empty-row"><td colspan="6">${escapeHtml(data.error || 'Unable to read connection status')}</td></tr>`;
+            interfacesBody.innerHTML = `<tr class="empty-row"><td colspan="7">${escapeHtml(data.error || 'Unable to read connection status')}</td></tr>`;
             renderSavedTable();
             return;
         }
@@ -465,13 +491,16 @@
         });
 
         if (!interfaces.length) {
-            interfacesBody.innerHTML = '<tr class="empty-row"><td colspan="6">No wireless interface detected.</td></tr>';
+            interfacesBody.innerHTML = '<tr class="empty-row"><td colspan="7">No wireless interface detected.</td></tr>';
         } else {
             interfacesBody.innerHTML = interfaces.map(ifc => {
                 const strength = ifc.connected && ifc.signal != null ? signalStrength(ifc.signal) : 0;
                 const statusCell = ifc.connected
                     ? `${escapeHtml(ifc.ssid)} <span class="badge badge-connected">Connected</span>`
                     : '<span class="cell-muted">Not connected</span>';
+                const genCell = ifc.connected
+                    ? wifiGenBadge(ifc.wifi_generation, ifc.protocol)
+                    : '<span class="cell-muted">&mdash;</span>';
                 const ipCell = ifc.connected ? escapeHtml(ifc.ip_address || 'no IP') : '<span class="cell-muted">&mdash;</span>';
                 const signalCell = ifc.connected && ifc.signal != null
                     ? `${signalBarsHtml(strength)} <span class="badge badge-signal ${signalBadgeClass(strength)}">${ifc.signal}%</span>`
@@ -486,6 +515,7 @@
                     <tr class="${ifc.connected ? 'row-connected' : ''}">
                         <td class="iface-name"><i class="fa-solid fa-ethernet"></i> ${escapeHtml(ifc.interface)}</td>
                         <td>${statusCell}</td>
+                        <td>${genCell}</td>
                         <td>${ipCell}</td>
                         <td>${signalCell}</td>
                         <td>${bandChanCell}</td>
@@ -536,13 +566,13 @@
 
     function renderNetworks(data) {
         if (!data.success) {
-            networksBody.innerHTML = `<tr class="empty-row"><td colspan="6">${escapeHtml(data.error || 'Scan failed')}</td></tr>`;
+            networksBody.innerHTML = `<tr class="empty-row"><td colspan="7">${escapeHtml(data.error || 'Scan failed')}</td></tr>`;
             scanStatusText.textContent = data.error || 'Scan failed';
             return;
         }
 
         if (!data.networks.length) {
-            networksBody.innerHTML = '<tr class="empty-row"><td colspan="6">No networks found. Try rescanning.</td></tr>';
+            networksBody.innerHTML = '<tr class="empty-row"><td colspan="7">No networks found. Try rescanning.</td></tr>';
         } else {
             networksBody.innerHTML = data.networks.map(net => {
                 const strength = signalStrength(net.signal);
@@ -554,6 +584,7 @@
                 const actionCell = connectedHere
                     ? `<button class="btn btn-red btn-sm" data-disconnect-iface="${escapeHtml(data.interface)}"><i class="fa-solid fa-plug-circle-xmark"></i> Disconnect</button>`
                     : `<button class="btn btn-blue btn-sm" data-connect-ssid="${escapeHtml(net.ssid)}" data-connect-security="${escapeHtml(net.security)}"><i class="fa-solid fa-plug"></i> Connect</button>`;
+                const genCell = wifiGenBadge(net.wifi_generation, net.protocol);
                 return `
                     <tr class="${connectedHere ? 'row-connected' : ''} ${isSelected ? 'row-selected' : ''}" data-net-ssid="${escapeHtml(net.ssid)}" data-net-security="${escapeHtml(net.security)}">
                         <td class="ssid-cell">
@@ -563,6 +594,7 @@
                         </td>
                         <td>${signalBarsHtml(strength)} <span class="badge badge-signal ${signalBadgeClass(strength)}">${net.signal}%</span></td>
                         <td>${securityBadge(net.security)}</td>
+                        <td>${genCell}</td>
                         <td>${escapeHtml(net.band || '?')}</td>
                         <td>${net.channel != null ? net.channel : '?'}</td>
                         <td style="text-align:right;">${actionCell}</td>

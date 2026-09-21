@@ -45,6 +45,10 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertIn('fa-spinner fa-spin', html)
         self.assertIn('Connecting all', html)
 
+    def test_index_route_displays_generation_column(self):
+        html = self.client.get('/').get_data(as_text=True)
+        self.assertIn('<th>Generation</th>', html)
+
     def test_api_hostname_route(self):
         response = self.client.get('/api/hostname')
         self.assertEqual(response.status_code, 200)
@@ -64,6 +68,64 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertEqual(conn_app_module.classify_band(5180), '5GHz')
         self.assertEqual(conn_app_module.classify_band(6135), '6GHz')
         self.assertIsNone(conn_app_module.classify_band(None))
+
+    def test_classify_wifi_generation(self):
+        # Wi-Fi 7 (802.11be)
+        gen, proto = conn_app_module.classify_wifi_generation(bitrate_str="tx bitrate: 2400.0 MBit/s EHT-MCS 7")
+        self.assertEqual((gen, proto), ("Wi-Fi 7", "802.11be"))
+        gen, proto = conn_app_module.classify_wifi_generation(raw_ies={"EHT capabilities": "..."})
+        self.assertEqual((gen, proto), ("Wi-Fi 7", "802.11be"))
+
+        # Wi-Fi 6E (802.11ax on 6GHz)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=6135, bitrate_str="tx bitrate: 1201.0 MBit/s HE-MCS 11")
+        self.assertEqual((gen, proto), ("Wi-Fi 6E", "802.11ax"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=6135, raw_ies={"HE capabilities": "..."})
+        self.assertEqual((gen, proto), ("Wi-Fi 6E", "802.11ax"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=6135)
+        self.assertEqual((gen, proto), ("Wi-Fi 6E", "802.11ax"))
+
+        # Wi-Fi 6 (802.11ax on 2.4/5GHz)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5220, bitrate_str="tx bitrate: 1201.0 MBit/s HE-MCS 11")
+        self.assertEqual((gen, proto), ("Wi-Fi 6", "802.11ax"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=2437, bitrate_str="tx bitrate: 574.0 MBit/s HE-MCS 9")
+        self.assertEqual((gen, proto), ("Wi-Fi 6", "802.11ax"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5180, raw_ies={"HE capabilities": "..."})
+        self.assertEqual((gen, proto), ("Wi-Fi 6", "802.11ax"))
+        gen, proto = conn_app_module.classify_wifi_generation(bitrate_str="tx bitrate: 2882.9 MBit/s", freq_mhz=5180)
+        self.assertEqual((gen, proto), ("Wi-Fi 6", "802.11ax"))
+
+        # Wi-Fi 5 (802.11ac)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5220, bitrate_str="tx bitrate: 866.7 MBit/s VHT-MCS 9")
+        self.assertEqual((gen, proto), ("Wi-Fi 5", "802.11ac"))
+        gen, proto = conn_app_module.classify_wifi_generation(raw_ies={"VHT capabilities": "..."})
+        self.assertEqual((gen, proto), ("Wi-Fi 5", "802.11ac"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5180)
+        self.assertEqual((gen, proto), ("Wi-Fi 5", "802.11ac"))
+
+        # Wi-Fi 4 (802.11n)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=2437, bitrate_str="tx bitrate: 144.4 MBit/s MCS 15 short GI")
+        self.assertEqual((gen, proto), ("Wi-Fi 4", "802.11n"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5180, bitrate_str="tx bitrate: 300.0 MBit/s HT-MCS 15")
+        self.assertEqual((gen, proto), ("Wi-Fi 4", "802.11n"))
+        gen, proto = conn_app_module.classify_wifi_generation(raw_ies={"HT capabilities": "..."})
+        self.assertEqual((gen, proto), ("Wi-Fi 4", "802.11n"))
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=2437)
+        self.assertEqual((gen, proto), ("Wi-Fi 4", "802.11n"))
+
+        # Wi-Fi 3 (802.11g)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=2437, bitrate_str="tx bitrate: 54.0 MBit/s")
+        self.assertEqual((gen, proto), ("Wi-Fi 3", "802.11g"))
+
+        # Wi-Fi 2 (802.11a)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=5180, bitrate_str="tx bitrate: 54.0 MBit/s")
+        self.assertEqual((gen, proto), ("Wi-Fi 2", "802.11a"))
+
+        # Wi-Fi 1 (802.11b)
+        gen, proto = conn_app_module.classify_wifi_generation(freq_mhz=2412, bitrate_str="tx bitrate: 11.0 MBit/s")
+        self.assertEqual((gen, proto), ("Wi-Fi 1", "802.11b"))
+
+        # Unknown / None
+        self.assertEqual(conn_app_module.classify_wifi_generation(), (None, None))
 
     def test_friendly_connect_error_maps_bad_password(self):
         msg = conn_app_module.friendly_connect_error(
@@ -115,6 +177,46 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertEqual(ifc['ssid'], 'HomeNetwork')
         self.assertEqual(ifc['ip_address'], '192.168.1.42')
         self.assertEqual(ifc['band'], '5GHz')
+        self.assertEqual(ifc['wifi_generation'], 'Wi-Fi 5')
+        self.assertEqual(ifc['protocol'], '802.11ac')
+
+    @patch('wifi_connection_manager.app.get_link_bitrate_and_freq')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_status_reports_wifi_generation_from_iw_bitrate(self, mock_run, mock_ifaces, mock_iw):
+        mock_ifaces.return_value = ["wlan0"]
+
+        def side_effect(args, timeout=None):
+            if args[:3] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN,FREQ"]:
+                return "*:SuperWifi:90:WPA2:44:5220 MHz\n", None
+            if args[:3] == ["-t", "-f", "IP4.ADDRESS"]:
+                return "IP4.ADDRESS[1]:192.168.1.50/24\n", None
+            if args[:3] == ["-t", "-f", "GENERAL.CONNECTION"]:
+                return "GENERAL.CONNECTION:SuperWifi\n", None
+            return "", None
+
+        mock_run.side_effect = side_effect
+
+        # Wi-Fi 6 HE-MCS
+        mock_iw.return_value = ("1201.0 MBit/s HE-MCS 11 80MHz", 5220, "aa:bb:cc:dd:ee:01")
+        response = self.client.get('/api/status')
+        data = response.get_json()
+        self.assertEqual(data['interfaces'][0]['wifi_generation'], 'Wi-Fi 6')
+        self.assertEqual(data['interfaces'][0]['protocol'], '802.11ax')
+
+        # Wi-Fi 7 EHT-MCS
+        mock_iw.return_value = ("2400.0 MBit/s EHT-MCS 7", 5220, "aa:bb:cc:dd:ee:01")
+        response = self.client.get('/api/status')
+        data = response.get_json()
+        self.assertEqual(data['interfaces'][0]['wifi_generation'], 'Wi-Fi 7')
+        self.assertEqual(data['interfaces'][0]['protocol'], '802.11be')
+
+        # Wi-Fi 4 HT-MCS
+        mock_iw.return_value = ("144.4 MBit/s MCS 15 short GI", 2437, "aa:bb:cc:dd:ee:01")
+        response = self.client.get('/api/status')
+        data = response.get_json()
+        self.assertEqual(data['interfaces'][0]['wifi_generation'], 'Wi-Fi 4')
+        self.assertEqual(data['interfaces'][0]['protocol'], '802.11n')
 
     @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
@@ -180,6 +282,35 @@ class TestWifiConnectionManager(unittest.TestCase):
         strong = next(n for n in data['networks'] if n['ssid'] == 'Strong')
         self.assertEqual(strong['signal'], 90)
         self.assertEqual(strong['security'], 'Open')
+        self.assertEqual(strong['wifi_generation'], 'Wi-Fi 4')
+        self.assertEqual(strong['protocol'], '802.11n')
+
+    @patch('wifi_connection_manager.app.get_scan_dump_bssid_map')
+    @patch('wifi_connection_manager.app.get_wireless_interfaces')
+    @patch('wifi_connection_manager.app._run_nmcli')
+    def test_api_scan_with_iw_scan_dump_identifies_generations(self, mock_run, mock_ifaces, mock_dump):
+        mock_ifaces.return_value = ["wlan0"]
+        mock_dump.return_value = {
+            "aa:bb:cc:dd:ee:01": "BSS aa:bb:cc:dd:ee:01(on wlan0)\n\tHE capabilities:\n\t\tHE MAC...",
+            "aa:bb:cc:dd:ee:02": "BSS aa:bb:cc:dd:ee:02(on wlan0)\n\tVHT capabilities:\n\t\tVHT...",
+            "aa:bb:cc:dd:ee:03": "BSS aa:bb:cc:dd:ee:03(on wlan0)\n\tEHT capabilities:\n\t\tEHT...",
+        }
+        mock_run.return_value = (
+            " :NetAX:80:WPA2:36:5180 MHz:AA:BB:CC:DD:EE:01\n"
+            " :NetAC:75:WPA2:44:5220 MHz:AA:BB:CC:DD:EE:02\n"
+            " :NetBE:85:WPA3:1:2412 MHz:AA:BB:CC:DD:EE:03\n",
+            None,
+        )
+        response = self.client.get('/api/scan')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        by_ssid = {n['ssid']: n for n in data['networks']}
+        self.assertEqual(by_ssid['NetAX']['wifi_generation'], 'Wi-Fi 6')
+        self.assertEqual(by_ssid['NetAX']['protocol'], '802.11ax')
+        self.assertEqual(by_ssid['NetAC']['wifi_generation'], 'Wi-Fi 5')
+        self.assertEqual(by_ssid['NetAC']['protocol'], '802.11ac')
+        self.assertEqual(by_ssid['NetBE']['wifi_generation'], 'Wi-Fi 7')
+        self.assertEqual(by_ssid['NetBE']['protocol'], '802.11be')
 
     @patch('wifi_connection_manager.app.get_wireless_interfaces')
     @patch('wifi_connection_manager.app._run_nmcli')
