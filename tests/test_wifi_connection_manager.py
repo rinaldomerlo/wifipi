@@ -27,6 +27,9 @@ class TestWifiConnectionManager(unittest.TestCase):
         self.assertIn(b'WIFI', response.data)
         self.assertIn(b'CONNECT', response.data)
         self.assertIn(b'Network Connection Manager', response.data)
+        html = response.get_data(as_text=True)
+        self.assertNotIn('[Beta]', html)
+        self.assertNotIn('beta-badge', html)
 
     def test_index_route_displays_hostname(self):
         response = self.client.get('/')
